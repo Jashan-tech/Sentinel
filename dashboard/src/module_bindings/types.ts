@@ -42,6 +42,27 @@ export const Investigation = __t.object("Investigation", {
 });
 export type Investigation = __Infer<typeof Investigation>;
 
+export const InvestigationImage = __t.object("InvestigationImage", {
+  investigationId: __t.string(),
+  rackId: __t.string(),
+  imageId: __t.string(),
+  filename: __t.string(),
+  mimeType: __t.string(),
+  sourceType: __t.string(),
+  captureTimestamp: __t.option(__t.timestamp()),
+  uploadedAt: __t.timestamp(),
+  sourceUrl: __t.string(),
+  attribution: __t.string(),
+  license: __t.string(),
+  sha256: __t.string(),
+  byteSize: __t.u32(),
+  width: __t.u32(),
+  height: __t.u32(),
+  thumbnailDataUrl: __t.string(),
+  submittedBy: __t.identity(),
+});
+export type InvestigationImage = __Infer<typeof InvestigationImage>;
+
 export const Rack = __t.object("Rack", {
   rackId: __t.string(),
   profileId: __t.string(),
