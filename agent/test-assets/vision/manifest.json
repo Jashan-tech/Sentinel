@@ -1,0 +1,225 @@
+{
+  "_note": "Real photographs downloaded from Wikimedia Commons on 2026-11-07 for testing the SENTINEL Vision Agent. These are ONLINE_REFERENCE images, not photographs captured by SENTINEL. capture_timestamp is null because SENTINEL did not capture them; source_reported_date is what the source page states. visibly_observable / cannot_be_confirmed were written by a human reviewer from the images themselves and are not defect ground truth.",
+  "retrieved_via": "https://commons.wikimedia.org/w/api.php (imageinfo + extmetadata)",
+  "images": [
+    {
+      "image_id": "ref-rack-switches-patch-panels",
+      "file": "rack-switches-patch-panels.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:19-inch rackmount Ethernet switches and patch panels.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:19-inch_rackmount_Ethernet_switches_and_patch_panels.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/19-inch_rackmount_Ethernet_switches_and_patch_panels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/19-inch_rackmount_Ethernet_switches_and_patch_panels.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "1280x960",
+      "creator": "Dsimic",
+      "credit": "Own work",
+      "license": "CC BY-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "source_reported_date": "2009-10-23",
+      "capture_timestamp": null,
+      "description": "A couple of managed D-Link Gigabit Ethernet rackmount switches, connected to the Ethernet ports on a few Panduit patch panels using Category 6 patch cables (all equipment is installed in a standard 19-inch rack)",
+      "bytes": 419601,
+      "sha256": "793d2666ce6416000c0682fbcb76a17484af000d0a6fc8b1c6c55e7246b47d8a",
+      "useful_for": [
+        "server rack with visible equipment",
+        "switches with connected Ethernet cables",
+        "organized cabling",
+        "switch status LEDs"
+      ],
+      "visibly_observable": [
+        "Open rack with two patch panels (top), a keystone-style panel, two rack-mount switches labelled D-Link Web Smart Switch, and a Cisco-branded device on a shelf at the bottom",
+        "Many grey/white patch cables routed through horizontal cable managers in neat loops",
+        "Green/amber LEDs on the left side of both switches",
+        "Some patch-panel and keystone ports have no cable plugged in",
+        "Small orange/red light at the top right of the rack frame"
+      ],
+      "cannot_be_confirmed": [
+        "Which device any cable connects to",
+        "Whether unplugged ports are expected",
+        "Meaning of any LED colour without the manufacturer documentation",
+        "Device health, traffic or faults"
+      ]
+    },
+    {
+      "image_id": "ref-switch-cable-nest",
+      "file": "switch-cable-nest.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:Switch-and-nest.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Switch-and-nest.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/e/e9/Switch-and-nest.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e9/Switch-and-nest.jpg/1920px-Switch-and-nest.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "3072x2304",
+      "creator": "The original uploader was J.smith at English Wikipedia.",
+      "credit": "Transferred from en.wikipedia to Commons by J.smith using CommonsHelper.",
+      "license": "CC BY-SA 2.5",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.5",
+      "source_reported_date": "17 June 2007 (original upload date)",
+      "capture_timestamp": null,
+      "description": "A gigabit en:HP-en:ProCurve en:network switch in a nest of Cat5 cables.",
+      "bytes": 792903,
+      "sha256": "bbcff2118e23669515b4f307d72dffa48a425d02c74bb2f3420aa49591431ed3",
+      "useful_for": [
+        "cable organization issues",
+        "switch with connected Ethernet cables",
+        "visible labels"
+      ],
+      "visibly_observable": [
+        "HP ProCurve-branded modular switch chassis with front status/LED legend panel",
+        "Dense, crossing blue, grey, white and black cables in front of the chassis; some cable ties",
+        "Some ports in the upper module appear to have no cable",
+        "A few small green LEDs between cables"
+      ],
+      "cannot_be_confirmed": [
+        "Port numbers of individual cables (mostly occluded)",
+        "Whether the cabling causes airflow or reliability problems",
+        "Any link or hardware status"
+      ]
+    },
+    {
+      "image_id": "ref-switch-24port-fastethernet",
+      "file": "switch-24port-fastethernet.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:Switch fastethernet dlink.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Switch_fastethernet_dlink.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/7/76/Switch_fastethernet_dlink.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://upload.wikimedia.org/wikipedia/commons/7/76/Switch_fastethernet_dlink.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "1280x960",
+      "creator": "Mvdiogo",
+      "credit": "Own work",
+      "license": "CC BY-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "source_reported_date": "2008-07-09",
+      "capture_timestamp": null,
+      "description": "Switch 24 ports for fast ethernet",
+      "bytes": 144468,
+      "sha256": "c71bcee50ebc4a6dbf8c3aee282b57acca9faa527fccb59e6e59cc6e563569ee",
+      "useful_for": [
+        "switch front panel",
+        "port occupancy",
+        "status indicators (small, low resolution)"
+      ],
+      "visibly_observable": [
+        "Two stacked D-Link switches; model text partially legible (DES-1024 series appearance)",
+        "Many blue cables plugged into the right-hand port area of both switches",
+        "Small green Power LEDs; port LEDs are tiny and mostly not distinguishable"
+      ],
+      "cannot_be_confirmed": [
+        "Exact number of occupied ports (cables occlude ports)",
+        "Per-port LED states (too small/low resolution)",
+        "Exact model numbers"
+      ]
+    },
+    {
+      "image_id": "ref-switch-5port-led-closeup",
+      "file": "switch-5port-led-closeup.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:Netgear Gigabit Switch 5-port.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Netgear_Gigabit_Switch_5-port.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/a/a2/Netgear_Gigabit_Switch_5-port.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Netgear_Gigabit_Switch_5-port.jpg/1920px-Netgear_Gigabit_Switch_5-port.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "4928x3264",
+      "creator": "Simon A. Eugster",
+      "credit": "Own work",
+      "license": "CC BY-SA 3.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+      "source_reported_date": "2012-12-15",
+      "capture_timestamp": null,
+      "description": "A 5-port gigabit ethernet switch by Netgear. The LED above the red plug indicates an existing link (i.e. it is connected to some other device), the yellow cable is unconnected.",
+      "bytes": 169319,
+      "sha256": "071617f2108d4983b39a0369eaaee34daa02a100dcf2b316763d1c2da922bd3e",
+      "useful_for": [
+        "close-up of switch panel with status indicators",
+        "connected and visibly empty ports"
+      ],
+      "visibly_observable": [
+        "NETGEAR 5-port Gigabit switch, model text GS105 printed on top",
+        "Panel legend: On=Link, Blink=ACT; Both=1000M, 100M, 10M",
+        "Yellow cable plugged into port 3, red cable plugged into port 5",
+        "Ports 1, 2 and 4 visibly empty",
+        "Green Power LED lit on the left; green LEDs lit beside port 5"
+      ],
+      "cannot_be_confirmed": [
+        "Whether the yellow cable is connected at its far end (the source description says it is not, but that is not visible in the image)",
+        "Link speed, without reading the LED combination against documentation",
+        "Any fault"
+      ]
+    },
+    {
+      "image_id": "ref-rack-rear-nersc-closeup",
+      "file": "rack-rear-nersc-closeup.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:Rear of rack at NERSC data center - closeup.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Rear_of_rack_at_NERSC_data_center_-_closeup.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/f/ff/Rear_of_rack_at_NERSC_data_center_-_closeup.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/ff/Rear_of_rack_at_NERSC_data_center_-_closeup.jpg/1920px-Rear_of_rack_at_NERSC_data_center_-_closeup.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "2860x4304",
+      "creator": "Derrick Coetzee from Berkeley, CA, USA",
+      "credit": "Rear of rack at NERSC data center - closeup Uploaded by Dcoetzee",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "source_reported_date": "2011-10-14 13:54",
+      "capture_timestamp": null,
+      "description": "Showing blue LED screens giving MAC address and serial number. White cables are Ethernet cables. Each server features commodity PC outlets including a serial port, VGA port, PS/2 ports, and USB ports. CC0 waiver: To the extent possible under law, I waive all copyright and related or neighboring rights to this work.",
+      "bytes": 1973814,
+      "sha256": "914677e176dc369fc9febef679da71f4d157fb2115103a58afbcbbcc73772b23",
+      "useful_for": [
+        "server rack with clearly visible equipment",
+        "labels",
+        "LED indicators",
+        "organized cabling"
+      ],
+      "visibly_observable": [
+        "Rack labelled \"A\" with a label reading SGI-07A; Rackable-branded hardware",
+        "Stack of 1U servers, each with a blue LCD showing text (MAC/serial-style) and asset labels reading LBNL AHJ with numbers",
+        "White Ethernet cables bundled with velcro straps on the right; one cable per server plugged in",
+        "Green, blue and red indicator LEDs on each server; amber LEDs on a switch near the top"
+      ],
+      "cannot_be_confirmed": [
+        "Meaning of red/amber indicators (no documentation)",
+        "Whether all servers are healthy",
+        "Full LCD text (partly unreadable at this size)"
+      ]
+    },
+    {
+      "image_id": "ref-cable-closet",
+      "file": "cable-closet.jpg",
+      "source_type": "ONLINE_REFERENCE",
+      "title": "File:Cable closet bh.jpg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Cable_closet_bh.jpg",
+      "original_image_url": "https://upload.wikimedia.org/wikipedia/commons/8/82/Cable_closet_bh.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "downloaded_image_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/82/Cable_closet_bh.jpg/1920px-Cable_closet_bh.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "downloaded_variant": "Wikimedia Commons thumbnail (resized by Wikimedia; content otherwise unmodified)",
+      "original_size": "2080x1544",
+      "creator": "Brian Hankins (Wikimedia user Bhankins)",
+      "credit": null,
+      "license": "Public domain",
+      "license_url": null,
+      "source_reported_date": "2005-06-29 (stated by the photographer on the file page)",
+      "capture_timestamp": null,
+      "description": "Cable closet with messy Cat5 where Brian works.",
+      "bytes": 648393,
+      "sha256": "a24f8860b682c9ece88c544c0c9ac5ae2042cb0e474bffdee23dc39eacdc2b36",
+      "license_basis": "{{PD-user|Bhankins}} / CopyrightedFreeUse-User on the file page; photographer released it to the public domain",
+      "useful_for": [
+        "rack cabling with visible organization problems",
+        "dense cable occlusion"
+      ],
+      "visibly_observable": [
+        "Wiring closet: multiple racks with patch panels almost completely covered by a dense mass of blue and grey cables",
+        "An orange cable coiled loosely in the middle",
+        "A NETGEAR-branded switch at top right with green LEDs",
+        "Photographer describes it as \"Cable closet with messy Cat5\""
+      ],
+      "cannot_be_confirmed": [
+        "Any port occupancy (ports occluded)",
+        "Whether airflow or service is affected",
+        "Individual cable destinations"
+      ]
+    }
+  ]
+}

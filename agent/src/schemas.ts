@@ -48,6 +48,46 @@ export const ActiveAlert = z.object({
   raised_at: z.iso.datetime({ offset: true }).optional(),
 });
 
+// ---------- Images (Feature 4) ----------
+
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // decoded bytes
+export const MAX_IMAGE_DIMENSION = 4096; // px, either side
+export const MAX_IMAGES = 1;
+export const IMAGE_SOURCE_TYPES = ["MANUAL_UPLOAD", "ONLINE_REFERENCE", "ROVER_CAMERA"] as const;
+
+/** One image supplied with an investigation. Bytes travel as base64; URLs are metadata only and are never fetched. */
+export const ImageInput = z.object({
+  image_id: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/).optional(),
+  filename: z.string().min(1).max(200),
+  mime_type: z.enum(["image/jpeg", "image/png"]),
+  data_base64: z.string().min(1).max(Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 8),
+  source_type: z.enum(IMAGE_SOURCE_TYPES),
+  /** Only when actually known (e.g. a camera clock). Never inferred. */
+  capture_timestamp: z.iso.datetime({ offset: true }).nullish(),
+  source_url: z.string().max(500).regex(/^https?:\/\//, "source_url must be http(s)").nullish(),
+  attribution: z.string().max(300).nullish(),
+  license: z.string().max(100).nullish(),
+});
+export type ImageInput = z.infer<typeof ImageInput>;
+
+/** Provenance recorded by the server for each accepted image (no pixel data). */
+export const ImageProvenance = z.object({
+  image_id: z.string(),
+  filename: z.string(),
+  mime_type: z.string(),
+  source_type: z.enum(IMAGE_SOURCE_TYPES),
+  capture_timestamp: z.string().nullable(),
+  uploaded_at: z.string(),
+  source_url: z.string().nullable(),
+  attribution: z.string().nullable(),
+  license: z.string().nullable(),
+  sha256: z.string(),
+  byte_size: z.number().int(),
+  width: z.number().int(),
+  height: z.number().int(),
+});
+export type ImageProvenance = z.infer<typeof ImageProvenance>;
+
 export const InvestigationRequest = z.object({
   rack_id: RackId,
   rack_name: z.string().min(1).max(128),
@@ -60,6 +100,10 @@ export const InvestigationRequest = z.object({
   as_of: z.iso.datetime({ offset: true }).optional(),
   /** Freshness window for current readings. Defaults to STALE_AFTER_MINUTES. */
   stale_after_minutes: z.number().positive().max(1440).optional(),
+  /** Optional photographs for the Vision Agent (Feature 4). */
+  images: z.array(ImageInput).max(MAX_IMAGES).default([]),
+  /** What the operator asked for. Informs the Supervisor; does not force any agent. */
+  inspection_mode: z.enum(["TELEMETRY", "VISUAL", "COMBINED"]).optional(),
 });
 export type InvestigationRequest = z.infer<typeof InvestigationRequest>;
 
@@ -117,7 +161,7 @@ export type InvestigationEvent = z.infer<typeof InvestigationEvent>;
 
 // ---------- Multi-agent ----------
 
-export const SPECIALISTS = ["telemetry", "environment", "documentation"] as const;
+export const SPECIALISTS = ["telemetry", "environment", "documentation", "vision"] as const;
 export const AgentName = z.enum([...SPECIALISTS, "verification"]);
 export type AgentName = z.infer<typeof AgentName>;
 
@@ -138,6 +182,33 @@ export const SpecialistOutput = z.object({
   recommended_next_action: z.string().max(600).default(""),
 });
 
+export const VISUAL_CATEGORIES = ["EQUIPMENT", "PORT", "CABLE", "LABEL", "LED", "PHYSICAL_IRREGULARITY", "OBSTRUCTION", "OTHER"] as const;
+const optText = z.string().max(600).nullish().transform((v) => v ?? "");
+
+/** One observation the Vision Agent made in an image. */
+export const VisualFinding = z.object({
+  observation: z.string().min(1).max(600),
+  component: optText,
+  image_location: optText,
+  category: z.enum(VISUAL_CATEGORIES).catch("OTHER"),
+  visual_evidence: optText,
+  certainty: z.enum(["CERTAIN", "UNCERTAIN"]).catch("UNCERTAIN"),
+  potential_concern: z.string().max(600).nullish().transform((v) => v || null),
+  limitations: optText,
+  recommended_follow_up: optText,
+});
+export type VisualFinding = z.infer<typeof VisualFinding>;
+
+/** What the Vision model writes. */
+export const VisionOutput = z.object({
+  visual_findings: z.array(VisualFinding).min(1).max(20),
+  unreadable_regions: z.array(z.string()).max(10).default([]),
+  additional_photos_needed: z.array(z.string()).max(10).default([]),
+  hypotheses: z.array(Hypothesis).max(5).default([]),
+  missing_information: z.array(z.string()).max(10).default([]),
+  recommended_next_action: z.string().max(600).nullish().transform((v) => v ?? ""),
+});
+
 export const AgentToolCallRecord = ToolCallRecord.extend({ agent: z.string() });
 export type AgentToolCallRecord = z.infer<typeof AgentToolCallRecord>;
 
@@ -148,6 +219,11 @@ export const SpecialistFinding = SpecialistOutput.extend({
   objective: z.string(),
   tools_executed: z.array(AgentToolCallRecord),
   status: AgentRunStatus,
+  // Vision Agent only:
+  image_id: z.string().optional(),
+  visual_findings: z.array(VisualFinding).optional(),
+  unreadable_regions: z.array(z.string()).optional(),
+  additional_photos_needed: z.array(z.string()).optional(),
 });
 export type SpecialistFinding = z.infer<typeof SpecialistFinding>;
 
@@ -181,6 +257,7 @@ export const Evidence = z.object({
   history: z.array(z.record(z.string(), z.unknown())),
   configured_thresholds: z.record(z.string(), z.unknown()).nullable(),
   documentation: z.array(z.record(z.string(), z.unknown())),
+  images: z.array(ImageProvenance).default([]),
 });
 export type Evidence = z.infer<typeof Evidence>;
 
@@ -194,5 +271,7 @@ export const MultiAgentReport = DiagnosticReport.extend({
   missing_information: z.array(z.string()),
   evidence: Evidence,
   limits_reached: z.array(z.string()),
+  inspection_mode: z.enum(["TELEMETRY", "VISUAL", "COMBINED"]),
+  visual_findings: z.array(VisualFinding.extend({ image_id: z.string() })).default([]),
 });
 export type MultiAgentReport = z.infer<typeof MultiAgentReport>;

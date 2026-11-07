@@ -17,10 +17,14 @@ export interface AgentConfig {
   maxSpecialistToolRounds: number;
   maxVerificationRetries: number;
   maxInvestigationSeconds: number;
+  /** Multimodal model for the Vision Agent (must accept image input). */
+  visionModel: string;
 }
 
 export const DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 export const HARD_MAX_ROUNDS = 5;
+/** Nemotron 3.5 Super VL accepts text + image (OpenAI-style image_url content parts). */
+export const DEFAULT_VISION_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 
 function intEnv(name: string, fallback: number, min = 1): number {
   const raw = process.env[name];
@@ -46,6 +50,7 @@ export function loadConfig(): AgentConfig {
     maxSpecialistToolRounds: Math.min(intEnv("MAX_SPECIALIST_TOOL_ROUNDS", 3), 3),
     maxVerificationRetries: Math.min(intEnv("MAX_VERIFICATION_RETRIES", 1, 0), 1),
     maxInvestigationSeconds: intEnv("MAX_INVESTIGATION_SECONDS", 90),
+    visionModel: process.env.NVIDIA_VISION_MODEL?.trim() || DEFAULT_VISION_MODEL,
     baseURL: process.env.NVIDIA_BASE_URL?.trim() || "https://integrate.api.nvidia.com/v1",
     maxRounds: Math.min(intEnv("MAX_INVESTIGATION_ROUNDS", HARD_MAX_ROUNDS), HARD_MAX_ROUNDS),
     maxOutputTokens: intEnv("MAX_OUTPUT_TOKENS", 2048),

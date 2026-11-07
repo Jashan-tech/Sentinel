@@ -59,6 +59,7 @@ export const testConfig: AgentConfig = {
   maxSpecialistToolRounds: 3,
   maxVerificationRetries: 1,
   maxInvestigationSeconds: 90,
+  visionModel: "fake-nemotron-vl",
 };
 
 export const fixture = (name: string) =>
