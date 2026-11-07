@@ -12,7 +12,7 @@ import { done, fakeModel, fixture, rawFixture, reportJson, testConfig, toolCall,
 const run = (req: InvestigationRequest, steps: Step[], maxRounds = 5) => {
   const fm = fakeModel(steps);
   const tools = createTools(createSnapshotDataSource(req, { staleAfterMinutes: 15 }));
-  return runInvestigation(req, { model: fm.model, modelName: "fake", tools, maxRounds }).then((r) => ({ ...r, fm }));
+  return runInvestigation(req, { model: fm.model, modelName: "fake", tools, maxRounds, staleAfterMinutes: 15 }).then((r) => ({ ...r, fm }));
 };
 
 test("multi-step investigation: model-selected tools execute and results feed back", async () => {
@@ -131,4 +131,10 @@ test("HTTP: concurrent investigations stay isolated", async () => {
     assert.equal(ra.tool_calls[0].args.rack_id, "rack-net-01");
     assert.equal(rc.tool_calls[0].args.rack_id, "rack-cmp-03");
   });
+});
+
+test("severity follows profile thresholds on fresh readings, overriding the model with a visible event", async () => {
+  const { report, events } = await run(fixture("a-normal"), [done(), reportJson("CRITICAL")]);
+  assert.equal(report.severity, "NORMAL");
+  assert.ok(events.some((e) => /Severity adjusted from CRITICAL to NORMAL/.test(e.description)));
 });

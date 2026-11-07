@@ -14,6 +14,7 @@ npm run dev                 # http://localhost:3001  POST /investigate
 npm run demo                # live Nemotron run over all sample scenarios
 npm run demo -- c-critical  # one scenario
 npm test && npm run typecheck
+npm run probe -- nvidia/<model-id>   # check a model's tool calling on your key
 ```
 
 `npm run demo` starts the server in-process on a random port and calls the real `/investigate` endpoint over HTTP. To target a server that is already running, set `AGENT_URL=http://localhost:3001`.
@@ -23,7 +24,7 @@ npm test && npm run typecheck
 | Variable | Default | Notes |
 |---|---|---|
 | `NVIDIA_API_KEY` | required | Without it, `/investigate` returns 500 with a clear message |
-| `NVIDIA_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Nemotron model hosted by NVIDIA, with tool calling |
+| `NVIDIA_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Nemotron model hosted by NVIDIA, with tool calling |
 | `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible endpoint |
 | `PORT` | `3001` | |
 | `MAX_INVESTIGATION_ROUNDS` | `5` | Tool-execution rounds. Hard cap is 5 |
@@ -134,5 +135,6 @@ Tool results are capped at 8,000 characters. When a history result is too large,
 ## Known limitations
 
 - Tools read from the snapshot in the request. SpacetimeDB integration is not wired up yet.
-- The severity is Nemotron's judgement. No deterministic rule overrides it.
+- Severity follows a fixed policy: the profile thresholds applied to fresh readings (`thresholdSeverity` in `tools.ts`). Nemotron is told this severity before it writes the report. If its output still disagrees, the policy value wins, and a `Severity adjusted` event appears in the timeline. Nemotron chooses the investigation steps, the hypotheses and the recommendations.
+- `nvidia/nemotron-3-super-120b-a12b` returned 404 for our key, so the default model is `nemotron-3.5-super-vl-120b-a12b`. Tool calling on that model was verified on 2026-11-07.
 - The investigation is synchronous. There is no streaming endpoint; the timeline comes back in the response.

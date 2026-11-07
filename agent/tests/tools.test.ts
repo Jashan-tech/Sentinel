@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSnapshotDataSource, createTools, MAX_HISTORY_LIMIT } from "../src/tools.js";
+import { createSnapshotDataSource, createTools, MAX_HISTORY_LIMIT, thresholdSeverity } from "../src/tools.js";
 import { InvestigationRequest } from "../src/schemas.js";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { fixture, rawFixture } from "./helpers.js";
@@ -99,4 +99,13 @@ test("request isolation: data sources are independent copies", async () => {
   assert.equal(JSON.parse(String(ra)).readings[0].numeric_value, 24.1);
   assert.equal(JSON.parse(String(rc)).readings[0].numeric_value, 35.4);
   assert.match(JSON.parse(String(await toolsA.get_rack_profile.invoke({ rack_id: "rack-cmp-03" }))).error, /Unknown rack_id/);
+});
+
+test("threshold severity policy: profile-dependent, stale data is UNKNOWN", () => {
+  assert.equal(thresholdSeverity(fixture("a-normal"), 15), "NORMAL");
+  assert.equal(thresholdSeverity(fixture("b-elevated"), 15), "WARNING");
+  assert.equal(thresholdSeverity(fixture("c-critical"), 15), "CRITICAL");
+  assert.equal(thresholdSeverity(fixture("d-stale"), 15), "UNKNOWN");
+  const b2 = { ...fixture("b-elevated"), profile: { name: "Net", temperature_warning_c: 32, temperature_critical_c: 38 } };
+  assert.equal(thresholdSeverity(b2, 15), "NORMAL");
 });

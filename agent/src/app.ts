@@ -49,6 +49,7 @@ export function createApp(deps: AppDeps = {}) {
       modelName: config.model,
       tools: createTools(ds),
       maxRounds: config.maxRounds,
+      staleAfterMinutes: config.staleAfterMinutes,
     });
     res.status(result.report.investigation_status === "FAILED" ? 502 : 200).json(result);
   });

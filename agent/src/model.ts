@@ -13,7 +13,7 @@ export interface AgentConfig {
   enableThinking: boolean;
 }
 
-export const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
+export const DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 export const HARD_MAX_ROUNDS = 5;
 
 function intEnv(name: string, fallback: number): number {

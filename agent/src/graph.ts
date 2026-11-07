@@ -8,6 +8,7 @@ import {
 } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { Runnable } from "@langchain/core/runnables";
+import { thresholdSeverity } from "./tools.js";
 import {
   DiagnosticReport,
   ModelReport,
@@ -27,6 +28,7 @@ export interface InvestigationOptions {
   modelName: string;
   tools: StructuredToolInterface[];
   maxRounds: number;
+  staleAfterMinutes: number;
 }
 
 export interface InvestigationResult {
@@ -64,7 +66,14 @@ Requirements:
 - Base every statement on tool results above; quote actual values, units and thresholds.
 - Hypotheses are possible explanations, not confirmed faults. Do not claim a root cause.
 - No confidence percentages. No manufacturer specs.
-- If key evidence is missing or stale, say so in missing_evidence; use "UNKNOWN" severity if you cannot assess the rack. Never call a rack NORMAL without fresh in-range readings.
+- Severity follows the rack profile thresholds applied to FRESH (non-stale) readings:
+  CRITICAL if any fresh reading is at/above its critical threshold; otherwise WARNING if any is at/above its warning threshold;
+  otherwise NORMAL if fresh ambient temperature is available and in range; UNKNOWN if there is no fresh ambient temperature.
+  A rising trend below the warning threshold does not raise severity; mention it in the summary and hypotheses instead.
+- Every supporting_evidence item must be an observation that actually points toward that hypothesis. A metric having a value
+  is not support by itself: a single ULTRASONIC_DISTANCE_CM reading without a baseline, or SOUND_RAW without a change over time,
+  does not support a fault. Omit hypotheses that have no real supporting evidence.
+- If key evidence is missing or stale, say so in missing_evidence. Never call a rack NORMAL without fresh in-range readings.
 - Only describe inspections that tools actually performed; put physical checks in recommended_next_inspection.`;
 
 const State = Annotation.Root({
@@ -247,7 +256,13 @@ export async function runInvestigation(
       return {};
     }
 
-    const convo: BaseMessage[] = [...state.messages, new HumanMessage(REPORT_PROMPT)];
+    const policy = thresholdSeverity(request, opts.staleAfterMinutes);
+    const convo: BaseMessage[] = [
+      ...state.messages,
+      new HumanMessage(
+        `${REPORT_PROMPT}\nThe threshold policy applied to fresh readings gives severity ${policy}; the report's severity will be ${policy}, so write the summary consistently with it.`,
+      ),
+    ];
     let lastProblem = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       let text: string;
@@ -266,6 +281,10 @@ export async function runInvestigation(
       }
       try {
         const parsed = ModelReport.parse(extractJson(text));
+        if (parsed.severity !== policy) {
+          emit("REPORT", `Severity adjusted from ${parsed.severity} to ${policy} per configured profile thresholds on fresh readings`);
+          parsed.severity = policy;
+        }
         const status = state.budgetExhausted ? "INCOMPLETE" : "COMPLETED";
         report = DiagnosticReport.parse({ ...parsed, ...baseReport(status) });
         emit(

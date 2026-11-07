@@ -186,3 +186,29 @@ export function createTools(ds: RackDataSource) {
     }),
   ];
 }
+
+export type Severity = "NORMAL" | "WARNING" | "CRITICAL" | "UNKNOWN";
+
+/**
+ * Deterministic severity policy: profile thresholds applied to fresh readings only.
+ * CRITICAL/WARNING if any fresh reading crosses a configured threshold; NORMAL only when a fresh
+ * ambient temperature exists and nothing crosses; otherwise UNKNOWN.
+ */
+export function thresholdSeverity(snapshot: InvestigationRequest, staleAfterMinutes: number): Severity {
+  const asOf = new Date(snapshot.as_of ?? Date.now());
+  const p = snapshot.profile;
+  const fresh = snapshot.current_telemetry.filter((r) => !annotate(r, asOf, staleAfterMinutes).stale);
+  let level = 0; // 0 normal, 1 warning, 2 critical
+  for (const r of fresh) {
+    const v = r.numeric_value;
+    if (r.metric_type === "AMBIENT_TEMPERATURE_C") {
+      level = Math.max(level, v >= p.temperature_critical_c ? 2 : v >= p.temperature_warning_c ? 1 : 0);
+    } else if (r.metric_type === "RELATIVE_HUMIDITY_PERCENT") {
+      if (p.humidity_critical_percent !== undefined && v >= p.humidity_critical_percent) level = 2;
+      else if (p.humidity_warning_percent !== undefined && v >= p.humidity_warning_percent) level = Math.max(level, 1);
+    }
+  }
+  if (level === 2) return "CRITICAL";
+  if (level === 1) return "WARNING";
+  return fresh.some((r) => r.metric_type === "AMBIENT_TEMPERATURE_C") ? "NORMAL" : "UNKNOWN";
+}

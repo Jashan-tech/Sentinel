@@ -14,18 +14,19 @@ import type { DiagnosticReport, InvestigationEvent } from "../src/schemas.js";
 const fixturesDir = new URL("../src/fixtures/", import.meta.url);
 const load = (name: string) => JSON.parse(readFileSync(new URL(`${name}.json`, fixturesDir), "utf8"));
 
-const scenarios: { name: string; body: any }[] = readdirSync(fixturesDir)
+const scenarios: { name: string; key: string; body: any }[] = readdirSync(fixturesDir)
   .filter((f) => f.endsWith(".json"))
   .sort()
   .map((f) => {
     const body = load(f.replace(/\.json$/, ""));
-    return { name: body._scenario ?? f, body };
+    return { name: body._scenario ?? f, key: f.replace(/\.json$/, ""), body };
   });
 
 // Profile-sensitivity demo: Scenario B's exact readings under a more tolerant profile.
 const b = load("b-elevated");
 scenarios.push({
   name: "B2 - Same readings as B, Standard Network profile (SIMULATED)",
+  key: "b2-profile",
   body: {
     ...b,
     rack_id: "rack-net-02",
@@ -38,7 +39,7 @@ scenarios.push({
 
 const filter = process.argv.slice(2);
 const selected = filter.length
-  ? scenarios.filter((s) => filter.some((f) => s.name.toLowerCase().includes(f.toLowerCase()) || s.body.rack_id === f || s.name.startsWith(f.toUpperCase())))
+  ? scenarios.filter((s) => filter.some((f) => s.key.startsWith(f.toLowerCase()) || s.name.startsWith(`${f.toUpperCase()} `)))
   : scenarios;
 
 try {
