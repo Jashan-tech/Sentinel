@@ -121,10 +121,10 @@ export type AgentName = z.infer<typeof AgentName>;
 
 /** Supervisor routing decision (written by the Supervisor model). */
 export const SupervisorDecision = z.object({
-  plan: z.string().max(1500).optional(),
+  plan: z.string().max(1500).nullish().transform((v) => v ?? undefined),
   next: z.enum([...AgentName.options, "finish"]),
-  objective: z.string().max(600).default(""),
-  reason: z.string().max(600).default(""),
+  objective: z.string().max(600).nullish().transform((v) => v ?? ""),
+  reason: z.string().max(600).nullish().transform((v) => v ?? ""),
 });
 export type SupervisorDecision = z.infer<typeof SupervisorDecision>;
 

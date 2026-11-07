@@ -70,7 +70,9 @@ const SENSOR_RULES = `Facts about the data:
 const FINDINGS_FORMAT = `When you are done, reply with ONLY this JSON object (no markdown, no prose):
 {"observations": string[], "hypotheses": [{"description": string, "supporting_evidence": string[], "contradicting_evidence": string[], "missing_evidence": string[]}], "missing_information": string[], "recommended_next_action": string}
 Each observation must quote the value, unit, metric, source_identifier, observed_at, and say SIMULATED or REAL.
-Hypotheses are possibilities, not confirmed faults. No confidence percentages. Be concise.`;
+Hypotheses are possibilities, not confirmed faults. No confidence percentages. Be concise.
+Report only what YOUR tools returned for YOUR objective. Do not copy other agents' observations or hypotheses;
+refer to them only to agree or disagree with specific evidence.`;
 
 const AGENT_PROMPTS: Record<AgentName, string> = {
   telemetry: `You are the TELEMETRY AGENT of SENTINEL, a data center investigation team.
@@ -137,6 +139,7 @@ Rules:
 - summary: measured facts (values, units, timestamps) and configured thresholds, clearly labelled; note simulated provenance.
 - hypotheses: competing explanations drawn from the specialists, with evidence for and against. Not confirmed faults.
 - verified_findings: only claims the Verification Agent confirmed (empty if verification did not run).
+- Drop, or explicitly qualify as unsupported, any claim the Verification Agent listed in unsupported_claims.
 - missing_information: unavailable or stale evidence, and missing manufacturer specs if documentation says so.
 - Do not claim a confirmed hardware failure or root cause. No confidence percentages. No invented specs.`;
 
@@ -360,7 +363,7 @@ export async function runMultiAgentInvestigation(
           return { output: schema.parse(extractJson(text)), records, status };
         } catch (err) {
           if (attempt === 1) throw err;
-          emit("AGENT", `${agent} returned malformed findings; requesting one repair`, "ERROR", { agent });
+          emit("AGENT", `${agent} returned malformed findings (${errMsg(err).slice(0, 120)}); requesting one repair`, "ERROR", { agent });
           const fix = await opts.specialistModel.invoke(
             [...msgs, new AIMessage(text.slice(0, 4000) || "(empty)"), new HumanMessage(`Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`)],
             { timeout: Math.max(1000, remaining()) },
@@ -383,7 +386,7 @@ export async function runMultiAgentInvestigation(
     const finish = (reason: string, limit?: string): Partial<S> => {
       if (limit && !limits.includes(limit)) limits.push(limit);
       emit(limit ? "GUARD" : "SUPERVISOR", reason, "INFO", { agent: "supervisor" });
-      return { decision: { next: "finish", objective: "", reason }, limitsReached: limits };
+      return { decision: { plan: undefined, next: "finish", objective: "", reason }, limitsReached: limits };
     };
 
     if (remaining() < FINAL_RESERVE_MS) {
@@ -412,7 +415,7 @@ Decide the next step.`;
       try {
         decision = SupervisorDecision.parse(extractJson(text));
       } catch (err) {
-        emit("SUPERVISOR", "Supervisor returned an invalid decision; requesting one repair", "ERROR", { agent: "supervisor" });
+        emit("SUPERVISOR", `Supervisor returned an invalid decision (${errMsg(err).slice(0, 120)}); requesting one repair`, "ERROR", { agent: "supervisor" });
         msgs.push(new AIMessage(text.slice(0, 2000) || "(empty)"), new HumanMessage(`Invalid decision (${errMsg(err).slice(0, 300)}). Reply with ONLY the JSON object.`));
       }
     }

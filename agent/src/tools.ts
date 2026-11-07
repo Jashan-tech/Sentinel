@@ -85,7 +85,11 @@ export function createSnapshotDataSource(
           note: `No historical observations of ${metricType} are available for this rack.`,
         };
       }
-      const obs = all.slice(-n).map((r) => annotate(r, asOf, stale));
+      // History is old by definition: report age, but not a "stale" flag (that applies to current readings).
+      const obs = all.slice(-n).map((r) => {
+        const { stale: _ignored, ...rest } = annotate(r, asOf, stale);
+        return rest;
+      });
       const values = obs.map((o) => o.numeric_value);
       return {
         rack_id: rackId,
