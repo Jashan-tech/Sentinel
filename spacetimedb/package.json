@@ -1,1 +1,8 @@
-{"name":"@sentinel/module","private":true,"type":"module","dependencies":{"spacetimedb":"2.14.1"}}
+{
+  "name": "@sentinel/module",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "spacetimedb": "2.14.1"
+  }
+}
