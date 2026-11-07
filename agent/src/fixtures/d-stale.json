@@ -1,0 +1,27 @@
+{
+  "_scenario": "D - Missing / stale data (SIMULATED)",
+  "rack_id": "rack-sto-04",
+  "rack_name": "Storage Rack D",
+  "equipment_type": "Storage",
+  "profile": {
+    "name": "Storage Rack (demo)",
+    "temperature_warning_c": 30,
+    "temperature_critical_c": 35,
+    "humidity_warning_percent": 60
+  },
+  "current_telemetry": [
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 25,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T10:50:00.000Z",
+      "ingested_at": "2026-11-07T10:50:01.000Z",
+      "simulated": true
+    }
+  ],
+  "recent_telemetry": [],
+  "active_alerts": [],
+  "as_of": "2026-11-07T14:00:00.000Z"
+}

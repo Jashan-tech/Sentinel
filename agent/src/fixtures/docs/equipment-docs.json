@@ -1,0 +1,53 @@
+{
+  "_note": "Local reference set for the Documentation Agent. Each entry states its provenance. No manufacturer manuals are loaded; manufacturer-specific limits are explicitly UNAVAILABLE.",
+  "documents": [
+    {
+      "doc_id": "SENTINEL-DEMO-PROFILES",
+      "title": "SENTINEL demo rack profiles",
+      "source_type": "FICTIONAL_DEMO_CONFIGURATION",
+      "verified": false,
+      "applies_to": ["Compute", "Network", "Storage"],
+      "topics": ["temperature", "humidity", "general"],
+      "content": "Rack profile thresholds (temperature_warning_c, temperature_critical_c, humidity_*_percent) are fictional settings created for the SENTINEL hackathon demo. They are not manufacturer specifications and are not derived from any vendor documentation."
+    },
+    {
+      "doc_id": "SENTINEL-SENSOR-NOTES",
+      "title": "SENTINEL rover sensor notes",
+      "source_type": "PROJECT_DOCUMENTATION",
+      "verified": true,
+      "applies_to": ["Compute", "Network", "Storage"],
+      "topics": ["temperature", "humidity", "acoustic", "distance", "general"],
+      "content": "The rover measures ambient temperature and relative humidity near the rack, raw sound intensity (SOUND_RAW, an uncalibrated microphone level, not decibels), and ultrasonic distance in cm to the nearest surface in front of the sensor. Rover ambient temperature is not equipment inlet or component temperature. The rover cannot read fan RPM, CPU utilization, power draw, interface errors, or hardware health."
+    },
+    {
+      "doc_id": "MFR-SPEC-COMPUTE",
+      "title": "Manufacturer specification: compute equipment",
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": false,
+      "availability": "UNAVAILABLE",
+      "applies_to": ["Compute"],
+      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+    },
+    {
+      "doc_id": "MFR-SPEC-NETWORK",
+      "title": "Manufacturer specification: network equipment",
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": false,
+      "availability": "UNAVAILABLE",
+      "applies_to": ["Network"],
+      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+    },
+    {
+      "doc_id": "MFR-SPEC-STORAGE",
+      "title": "Manufacturer specification: storage equipment",
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": false,
+      "availability": "UNAVAILABLE",
+      "applies_to": ["Storage"],
+      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+    }
+  ]
+}

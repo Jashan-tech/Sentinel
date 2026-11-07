@@ -1,0 +1,257 @@
+{
+  "_scenario": "C - Critical temperature (SIMULATED)",
+  "rack_id": "rack-cmp-03",
+  "rack_name": "Compute Rack C",
+  "equipment_type": "Compute",
+  "profile": {
+    "name": "High-Density Compute Rack (demo)",
+    "temperature_warning_c": 27,
+    "temperature_critical_c": 33,
+    "humidity_warning_percent": 60,
+    "humidity_critical_percent": 70
+  },
+  "current_telemetry": [
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 35.4,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:59:00.000Z",
+      "ingested_at": "2026-11-07T13:59:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 38,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:59:00.000Z",
+      "ingested_at": "2026-11-07T13:59:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 910,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:59:00.000Z",
+      "ingested_at": "2026-11-07T13:59:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "ULTRASONIC_DISTANCE_CM",
+      "numeric_value": 96,
+      "unit": "cm",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-us-01",
+      "observed_at": "2026-11-07T13:57:00.000Z",
+      "ingested_at": "2026-11-07T13:57:01.000Z",
+      "simulated": true
+    }
+  ],
+  "recent_telemetry": [
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 28.2,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:20:00.000Z",
+      "ingested_at": "2026-11-07T13:20:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 29.5,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:25:00.000Z",
+      "ingested_at": "2026-11-07T13:25:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 30.9,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:30:00.000Z",
+      "ingested_at": "2026-11-07T13:30:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 32.1,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:35:00.000Z",
+      "ingested_at": "2026-11-07T13:35:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 33.4,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:40:00.000Z",
+      "ingested_at": "2026-11-07T13:40:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 34.3,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:45:00.000Z",
+      "ingested_at": "2026-11-07T13:45:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 35,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:50:00.000Z",
+      "ingested_at": "2026-11-07T13:50:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "numeric_value": 35.4,
+      "unit": "C",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-temp-01",
+      "observed_at": "2026-11-07T13:55:00.000Z",
+      "ingested_at": "2026-11-07T13:55:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 640,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:24:00.000Z",
+      "ingested_at": "2026-11-07T13:24:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 700,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:30:00.000Z",
+      "ingested_at": "2026-11-07T13:30:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 760,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:36:00.000Z",
+      "ingested_at": "2026-11-07T13:36:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 820,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:42:00.000Z",
+      "ingested_at": "2026-11-07T13:42:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 880,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:48:00.000Z",
+      "ingested_at": "2026-11-07T13:48:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "SOUND_RAW",
+      "numeric_value": 910,
+      "unit": "raw",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-mic-01",
+      "observed_at": "2026-11-07T13:54:00.000Z",
+      "ingested_at": "2026-11-07T13:54:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 41,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:30:00.000Z",
+      "ingested_at": "2026-11-07T13:30:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 40,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:36:00.000Z",
+      "ingested_at": "2026-11-07T13:36:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 39,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:42:00.000Z",
+      "ingested_at": "2026-11-07T13:42:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 39,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:48:00.000Z",
+      "ingested_at": "2026-11-07T13:48:01.000Z",
+      "simulated": true
+    },
+    {
+      "metric_type": "RELATIVE_HUMIDITY_PERCENT",
+      "numeric_value": 38,
+      "unit": "%",
+      "source_type": "SIMULATOR",
+      "source_identifier": "sim-hum-01",
+      "observed_at": "2026-11-07T13:54:00.000Z",
+      "ingested_at": "2026-11-07T13:54:01.000Z",
+      "simulated": true
+    }
+  ],
+  "active_alerts": [
+    {
+      "alert_id": "alr-301",
+      "severity": "CRITICAL",
+      "metric_type": "AMBIENT_TEMPERATURE_C",
+      "message": "Ambient temperature above critical threshold",
+      "raised_at": "2026-11-07T13:51:00.000Z"
+    }
+  ],
+  "as_of": "2026-11-07T14:00:00.000Z"
+}
