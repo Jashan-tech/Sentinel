@@ -54,6 +54,11 @@ export const testConfig: AgentConfig = {
   maxOutputTokens: 256,
   staleAfterMinutes: 15,
   enableThinking: false,
+  specialistModel: "fake-nemotron-specialist",
+  maxDelegations: 5,
+  maxSpecialistToolRounds: 3,
+  maxVerificationRetries: 1,
+  maxInvestigationSeconds: 90,
 };
 
 export const fixture = (name: string) =>

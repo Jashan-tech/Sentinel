@@ -11,16 +11,22 @@ export interface AgentConfig {
   maxOutputTokens: number;
   staleAfterMinutes: number;
   enableThinking: boolean;
+  /** Model for Telemetry/Environment/Documentation/Verification agents (defaults to `model`). */
+  specialistModel: string;
+  maxDelegations: number;
+  maxSpecialistToolRounds: number;
+  maxVerificationRetries: number;
+  maxInvestigationSeconds: number;
 }
 
 export const DEFAULT_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 export const HARD_MAX_ROUNDS = 5;
 
-function intEnv(name: string, fallback: number): number {
+function intEnv(name: string, fallback: number, min = 1): number {
   const raw = process.env[name];
   if (!raw) return fallback;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n < 1) throw new ConfigError(`${name} must be a positive integer`);
+  if (!Number.isInteger(n) || n < min) throw new ConfigError(`${name} must be a positive integer`);
   return n;
 }
 
@@ -31,9 +37,15 @@ export function loadConfig(): AgentConfig {
       "NVIDIA_API_KEY is not set. Copy agent/.env.example to agent/.env and add a key from https://build.nvidia.com.",
     );
   }
+  const model = process.env.NVIDIA_MODEL?.trim() || DEFAULT_MODEL;
   return {
     apiKey,
-    model: process.env.NVIDIA_MODEL?.trim() || DEFAULT_MODEL,
+    model,
+    specialistModel: process.env.NVIDIA_SPECIALIST_MODEL?.trim() || model,
+    maxDelegations: Math.min(intEnv("MAX_DELEGATIONS", 5), 5),
+    maxSpecialistToolRounds: Math.min(intEnv("MAX_SPECIALIST_TOOL_ROUNDS", 3), 3),
+    maxVerificationRetries: Math.min(intEnv("MAX_VERIFICATION_RETRIES", 1, 0), 1),
+    maxInvestigationSeconds: intEnv("MAX_INVESTIGATION_SECONDS", 90),
     baseURL: process.env.NVIDIA_BASE_URL?.trim() || "https://integrate.api.nvidia.com/v1",
     maxRounds: Math.min(intEnv("MAX_INVESTIGATION_ROUNDS", HARD_MAX_ROUNDS), HARD_MAX_ROUNDS),
     maxOutputTokens: intEnv("MAX_OUTPUT_TOKENS", 2048),
@@ -46,9 +58,9 @@ export function loadConfig(): AgentConfig {
  * There is no JS `@langchain/nvidia-ai-endpoints` package, so we use LangChain's OpenAI
  * adapter against NVIDIA's OpenAI-compatible endpoint (which supports `tools`).
  */
-export function createModel(cfg: AgentConfig): BaseChatModel {
+export function createModel(cfg: AgentConfig, model: string = cfg.model): BaseChatModel {
   return new ChatOpenAI({
-    model: cfg.model,
+    model,
     apiKey: cfg.apiKey,
     configuration: { baseURL: cfg.baseURL },
     temperature: 0.2,

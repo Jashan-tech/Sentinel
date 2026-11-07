@@ -102,12 +102,95 @@ export type DiagnosticReport = z.infer<typeof DiagnosticReport>;
 
 // ---------- Timeline ----------
 
-export const EventType = z.enum(["START", "MODEL", "TOOL", "REPORT", "ERROR", "END"]);
+export const EventType = z.enum(["START", "SUPERVISOR", "AGENT", "GUARD", "MODEL", "TOOL", "VERIFY", "REPORT", "ERROR", "END"]);
 export const InvestigationEvent = z.object({
   type: EventType,
   timestamp: z.string(),
+  agent: z.string().optional(),
   tool: z.string().optional(),
   description: z.string(),
   status: z.enum(["SUCCESS", "ERROR", "INFO"]),
 });
 export type InvestigationEvent = z.infer<typeof InvestigationEvent>;
+
+// ---------- Multi-agent ----------
+
+export const SPECIALISTS = ["telemetry", "environment", "documentation"] as const;
+export const AgentName = z.enum([...SPECIALISTS, "verification"]);
+export type AgentName = z.infer<typeof AgentName>;
+
+/** Supervisor routing decision (written by the Supervisor model). */
+export const SupervisorDecision = z.object({
+  plan: z.string().max(1500).optional(),
+  next: z.enum([...AgentName.options, "finish"]),
+  objective: z.string().max(600).default(""),
+  reason: z.string().max(600).default(""),
+});
+export type SupervisorDecision = z.infer<typeof SupervisorDecision>;
+
+/** What a specialist model writes. */
+export const SpecialistOutput = z.object({
+  observations: z.array(z.string()).max(15).default([]),
+  hypotheses: z.array(Hypothesis).max(5).default([]),
+  missing_information: z.array(z.string()).max(10).default([]),
+  recommended_next_action: z.string().max(600).default(""),
+});
+
+export const AgentToolCallRecord = ToolCallRecord.extend({ agent: z.string() });
+export type AgentToolCallRecord = z.infer<typeof AgentToolCallRecord>;
+
+export const AgentRunStatus = z.enum(["COMPLETED", "INCOMPLETE", "FAILED"]);
+
+export const SpecialistFinding = SpecialistOutput.extend({
+  agent: AgentName,
+  objective: z.string(),
+  tools_executed: z.array(AgentToolCallRecord),
+  status: AgentRunStatus,
+});
+export type SpecialistFinding = z.infer<typeof SpecialistFinding>;
+
+/** What the Verification model writes. */
+export const VerificationOutput = z.object({
+  grounded: z.boolean(),
+  verified_findings: z.array(z.string()).max(10).default([]),
+  unsupported_claims: z.array(z.string()).max(10).default([]),
+  contradictions: z.array(z.string()).max(10).default([]),
+  missing_evidence: z.array(z.string()).max(10).default([]),
+  request_more_investigation: z.boolean().default(false),
+  follow_up_agent: z.enum(SPECIALISTS).nullable().optional(),
+  follow_up_objective: z.string().max(600).nullable().optional(),
+});
+
+export const VerificationResult = VerificationOutput.extend({
+  tools_executed: z.array(AgentToolCallRecord),
+  status: AgentRunStatus,
+});
+export type VerificationResult = z.infer<typeof VerificationResult>;
+
+/** What the Supervisor writes in the final synthesis. */
+export const FinalSynthesis = ModelReport.extend({
+  verified_findings: z.array(z.string()).max(10).default([]),
+  missing_information: z.array(z.string()).max(12).default([]),
+});
+
+/** Evidence compiled by code from actual tool results (not model-written). */
+export const Evidence = z.object({
+  measurements: z.array(z.record(z.string(), z.unknown())),
+  history: z.array(z.record(z.string(), z.unknown())),
+  configured_thresholds: z.record(z.string(), z.unknown()).nullable(),
+  documentation: z.array(z.record(z.string(), z.unknown())),
+});
+export type Evidence = z.infer<typeof Evidence>;
+
+export const MultiAgentReport = DiagnosticReport.extend({
+  tool_calls: z.array(AgentToolCallRecord),
+  supervisor_plan: z.string(),
+  agents_invoked: z.array(z.object({ agent: AgentName, objective: z.string(), status: AgentRunStatus })),
+  specialist_findings: z.array(SpecialistFinding),
+  verification: VerificationResult.nullable(),
+  verified_findings: z.array(z.string()),
+  missing_information: z.array(z.string()),
+  evidence: Evidence,
+  limits_reached: z.array(z.string()),
+});
+export type MultiAgentReport = z.infer<typeof MultiAgentReport>;

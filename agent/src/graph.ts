@@ -20,7 +20,7 @@ import {
 /** Minimal model surface the graph needs (satisfied by ChatOpenAI and by test fakes). */
 export interface InvestigatorModel {
   bindTools(tools: StructuredToolInterface[]): Runnable<BaseMessage[], AIMessage>;
-  invoke(messages: BaseMessage[]): Promise<AIMessage>;
+  invoke(messages: BaseMessage[], config?: { timeout?: number }): Promise<AIMessage>;
 }
 
 export interface InvestigationOptions {
@@ -102,7 +102,7 @@ export function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-function errMsg(err: unknown): string {
+export function errMsg(err: unknown): string {
   const m = err instanceof Error ? err.message : String(err);
   return m.replace(/nvapi-[A-Za-z0-9_-]+/g, "nvapi-***").slice(0, 300);
 }
@@ -113,7 +113,7 @@ function fmtArgs(args: Record<string, unknown>): string {
     .join(", ");
 }
 
-function summarizeResult(raw: string): { status: "SUCCESS" | "ERROR"; summary: string } {
+export function summarizeResult(raw: string): { status: "SUCCESS" | "ERROR"; summary: string } {
   try {
     const r = JSON.parse(raw);
     if (r.error) return { status: "ERROR", summary: String(r.error) };
@@ -130,6 +130,12 @@ function summarizeResult(raw: string): { status: "SUCCESS" | "ERROR"; summary: s
         summary: r.available
           ? `${r.returned} ${r.metric_type} observation(s), ${r.stats.first} -> ${r.stats.last}`
           : `no ${r.metric_type} history available`,
+      };
+    }
+    if (Array.isArray(r.documents)) {
+      return {
+        status: "SUCCESS",
+        summary: `${r.documents.length} document(s) for ${r.equipment_type}; manufacturer spec available: ${r.manufacturer_specification_available}`,
       };
     }
     if (r.profile) {

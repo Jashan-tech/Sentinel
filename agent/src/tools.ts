@@ -1,4 +1,5 @@
 import { tool } from "@langchain/core/tools";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   METRIC_TYPES,
@@ -211,4 +212,55 @@ export function thresholdSeverity(snapshot: InvestigationRequest, staleAfterMinu
   if (level === 2) return "CRITICAL";
   if (level === 1) return "WARNING";
   return fresh.some((r) => r.metric_type === "AMBIENT_TEMPERATURE_C") ? "NORMAL" : "UNKNOWN";
+}
+
+// ---------- Documentation (local, read-only reference set) ----------
+
+interface ReferenceDoc {
+  doc_id: string;
+  title: string;
+  source_type: string;
+  verified: boolean;
+  availability?: string;
+  applies_to: string[];
+  topics: string[];
+  content: string;
+}
+
+const DOCS: readonly ReferenceDoc[] = Object.freeze(
+  JSON.parse(readFileSync(new URL("./fixtures/docs/equipment-docs.json", import.meta.url), "utf8")).documents,
+);
+
+export const DOC_TOPICS = ["temperature", "humidity", "acoustic", "distance", "general"] as const;
+
+export function lookupDocumentation(equipmentType: string, topic?: (typeof DOC_TOPICS)[number]) {
+  const matches = DOCS.filter(
+    (d) =>
+      d.applies_to.some((a) => a.toLowerCase() === equipmentType.toLowerCase()) &&
+      (!topic || d.topics.includes(topic)),
+  );
+  return {
+    equipment_type: equipmentType,
+    topic: topic ?? "any",
+    documents: matches,
+    manufacturer_specification_available: matches.some(
+      (d) => d.source_type === "MANUFACTURER_SPECIFICATION" && d.availability !== "UNAVAILABLE",
+    ),
+    note:
+      matches.length === 0
+        ? `No reference documentation exists for equipment type "${equipmentType}".`
+        : "Only documents listed here exist. Do not cite any other source.",
+  };
+}
+
+export function createDocumentationTool() {
+  return tool(({ equipment_type, topic }) => run(() => lookupDocumentation(equipment_type, topic)), {
+    name: "lookup_equipment_documentation",
+    description:
+      "Look up the local reference documents for an equipment type (Compute, Network, Storage). Each document states its provenance (manufacturer spec, project documentation, or fictional demo configuration) and whether it is available/verified.",
+    schema: z.object({
+      equipment_type: z.string().min(1).max(64),
+      topic: z.enum(DOC_TOPICS).optional(),
+    }),
+  });
 }

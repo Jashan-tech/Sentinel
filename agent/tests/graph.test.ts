@@ -96,8 +96,8 @@ async function withServer(app: ReturnType<typeof createApp>, fn: (url: string) =
     server.close();
   }
 }
-const post = (url: string, body: unknown) =>
-  fetch(`${url}/investigate`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
+const post = (url: string, body: unknown, path = "/investigate?mode=single") =>
+  fetch(`${url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
 
 test("HTTP: validation errors return 400; missing config returns 500 with clear message", async () => {
   await withServer(createApp({ getModel: () => { throw new ConfigError("NVIDIA_API_KEY is not set."); } }), async (url) => {
