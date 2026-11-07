@@ -566,6 +566,14 @@ Decide the next step.`;
       next = "finish";
       objective = "";
     }
+    // Identical repeat of an earlier task (seen live: the same documentation task 3x) burns budget for nothing.
+    const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (next !== "finish" && next !== "verification" && state.assignments.some((a) => a.agent === next && norm(a.objective) === norm(objective))) {
+      emit("GUARD", `Supervisor repeated an identical ${next} task; not re-running it`, "INFO", { agent: "supervisor" });
+      const needsVerification = (policySeverity !== "NORMAL" || images.length > 0) && state.verificationRuns === 0;
+      next = needsVerification ? "verification" : "finish";
+      objective = needsVerification ? "Independently check the specialist findings against the data before the report is written." : "";
+    }
     if (next === "finish" && images.length && !visionRan && state.delegations < opts.maxDelegations) {
       next = "vision";
       objective = "Inspect the operator-supplied photograph and report what is directly visible.";

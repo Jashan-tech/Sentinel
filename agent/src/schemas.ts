@@ -119,12 +119,18 @@ export const Hypothesis = z.object({
   missing_evidence: z.array(z.string()).default([]),
 });
 
+/** Model-written lists/text are bounded by trimming, not rejection: an over-long but otherwise
+ *  valid answer should not cost a repair call or fail an investigation. */
+const capped = <T extends z.ZodTypeAny>(item: T, n: number) => z.array(item).default([]).transform((a) => a.slice(0, n));
+const cappedText = (n: number) => z.string().transform((v) => (v.length > n ? `${v.slice(0, n)}…` : v));
+const cappedOptText = (n: number) => z.string().nullish().transform((v) => ((v ?? "").length > n ? `${v!.slice(0, n)}…` : v ?? ""));
+
 /** The part of the report Nemotron writes. */
 export const ModelReport = z.object({
   severity: Severity,
-  summary: z.string().min(1).max(1000),
-  hypotheses: z.array(Hypothesis).max(6).default([]),
-  recommended_next_inspection: z.array(z.string()).max(8).default([]),
+  summary: z.string().min(1).pipe(cappedText(2500)),
+  hypotheses: capped(Hypothesis, 8),
+  recommended_next_inspection: capped(z.string(), 10),
 });
 export type ModelReport = z.infer<typeof ModelReport>;
 
@@ -167,33 +173,33 @@ export type AgentName = z.infer<typeof AgentName>;
 
 /** Supervisor routing decision (written by the Supervisor model). */
 export const SupervisorDecision = z.object({
-  plan: z.string().max(1500).nullish().transform((v) => v ?? undefined),
+  plan: z.string().nullish().transform((v) => (v ? v.slice(0, 1500) : undefined)),
   next: z.enum([...AgentName.options, "finish"]),
-  objective: z.string().max(600).nullish().transform((v) => v ?? ""),
-  reason: z.string().max(600).nullish().transform((v) => v ?? ""),
+  objective: cappedOptText(600),
+  reason: cappedOptText(600),
 });
 export type SupervisorDecision = z.infer<typeof SupervisorDecision>;
 
 /** What a specialist model writes. */
 export const SpecialistOutput = z.object({
-  observations: z.array(z.string()).max(15).default([]),
-  hypotheses: z.array(Hypothesis).max(5).default([]),
-  missing_information: z.array(z.string()).max(10).default([]),
-  recommended_next_action: z.string().max(600).default(""),
+  observations: capped(z.string(), 20),
+  hypotheses: capped(Hypothesis, 6),
+  missing_information: capped(z.string(), 30),
+  recommended_next_action: cappedOptText(600),
 });
 
 export const VISUAL_CATEGORIES = ["EQUIPMENT", "PORT", "CABLE", "LABEL", "LED", "PHYSICAL_IRREGULARITY", "OBSTRUCTION", "OTHER"] as const;
-const optText = z.string().max(600).nullish().transform((v) => v ?? "");
+const optText = cappedOptText(600);
 
 /** One observation the Vision Agent made in an image. */
 export const VisualFinding = z.object({
-  observation: z.string().min(1).max(600),
+  observation: z.string().min(1).pipe(cappedText(600)),
   component: optText,
   image_location: optText,
   category: z.enum(VISUAL_CATEGORIES).catch("OTHER"),
   visual_evidence: optText,
   certainty: z.enum(["CERTAIN", "UNCERTAIN"]).catch("UNCERTAIN"),
-  potential_concern: z.string().max(600).nullish().transform((v) => v || null),
+  potential_concern: z.string().nullish().transform((v) => (v ? v.slice(0, 600) : null)),
   limitations: optText,
   recommended_follow_up: optText,
 });
@@ -201,12 +207,12 @@ export type VisualFinding = z.infer<typeof VisualFinding>;
 
 /** What the Vision model writes. */
 export const VisionOutput = z.object({
-  visual_findings: z.array(VisualFinding).min(1).max(20),
-  unreadable_regions: z.array(z.string()).max(10).default([]),
-  additional_photos_needed: z.array(z.string()).max(10).default([]),
-  hypotheses: z.array(Hypothesis).max(5).default([]),
-  missing_information: z.array(z.string()).max(10).default([]),
-  recommended_next_action: z.string().max(600).nullish().transform((v) => v ?? ""),
+  visual_findings: z.array(VisualFinding).min(1).transform((a) => a.slice(0, 20)),
+  unreadable_regions: capped(z.string(), 10),
+  additional_photos_needed: capped(z.string(), 10),
+  hypotheses: capped(Hypothesis, 6),
+  missing_information: capped(z.string(), 15),
+  recommended_next_action: cappedOptText(600),
 });
 
 export const AgentToolCallRecord = ToolCallRecord.extend({ agent: z.string() });
@@ -230,13 +236,13 @@ export type SpecialistFinding = z.infer<typeof SpecialistFinding>;
 /** What the Verification model writes. */
 export const VerificationOutput = z.object({
   grounded: z.boolean(),
-  verified_findings: z.array(z.string()).max(10).default([]),
-  unsupported_claims: z.array(z.string()).max(10).default([]),
-  contradictions: z.array(z.string()).max(10).default([]),
-  missing_evidence: z.array(z.string()).max(10).default([]),
+  verified_findings: capped(z.string(), 20),
+  unsupported_claims: capped(z.string(), 20),
+  contradictions: capped(z.string(), 20),
+  missing_evidence: capped(z.string(), 20),
   request_more_investigation: z.boolean().default(false),
   follow_up_agent: z.enum(SPECIALISTS).nullable().optional(),
-  follow_up_objective: z.string().max(600).nullable().optional(),
+  follow_up_objective: z.string().nullish().transform((v) => (v ? v.slice(0, 600) : v)),
 });
 
 export const VerificationResult = VerificationOutput.extend({
@@ -247,8 +253,8 @@ export type VerificationResult = z.infer<typeof VerificationResult>;
 
 /** What the Supervisor writes in the final synthesis. */
 export const FinalSynthesis = ModelReport.extend({
-  verified_findings: z.array(z.string()).max(10).default([]),
-  missing_information: z.array(z.string()).max(12).default([]),
+  verified_findings: capped(z.string(), 20),
+  missing_information: capped(z.string(), 30),
 });
 
 /** Evidence compiled by code from actual tool results (not model-written). */

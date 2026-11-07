@@ -199,3 +199,16 @@ test("HTTP: /investigate defaults to multi-agent", async () => {
     server.close();
   }
 });
+
+test("regression (live run): an identical repeated task is not re-run; verification still happens", async () => {
+  const req = fixture("c-critical");
+  const same = "Look up manufacturer documentation for the switches";
+  const { report, events } = await run(
+    req,
+    [decide("telemetry", "t", "p"), decide("documentation", same), decide("documentation", same), decide("finish"), synthesis()],
+    [findings(), findings("no mfr spec"), verdict()],
+  );
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "documentation", "verification"]);
+  assert.ok(events.some((e) => e.type === "GUARD" && /identical documentation task/.test(e.description)));
+  assert.equal(report.investigation_status, "COMPLETED");
+});

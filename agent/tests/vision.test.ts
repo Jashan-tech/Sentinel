@@ -212,3 +212,18 @@ test("HTTP: valid image runs the vision workflow; bad images and single-mode ima
   assert.equal((await post({ ...rawFixture("a-normal"), images: [img(Buffer.from("GIF89a"))] })).status, 400);
   assert.equal((await post({ ...rawFixture("a-normal"), images: [img(JPEG)] }, "/investigate?mode=single")).status, 400);
 });
+
+test("regression (live run): long vision output and an over-long summary still yield a valid COMPLETED report", async () => {
+  const many = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p} ${i}`);
+  const longSummary = json({ severity: "NORMAL", summary: "x".repeat(3000), hypotheses: [], recommended_next_inspection: [], verified_findings: many("v", 25), missing_information: many("m", 35) });
+  const { report } = await run(
+    withImage("a-normal"),
+    [decide("vision", "x", "p"), decide("finish"), longSummary],
+    [],
+    [visionOut({ missing_information: many("missing", 12), unreadable_regions: many("region", 10), additional_photos_needed: many("photo", 10) })],
+  );
+  MultiAgentReport.parse(report);
+  assert.equal(report.investigation_status, "COMPLETED");
+  assert.ok(report.summary.length <= 2501);
+  assert.equal(report.specialist_findings[0].missing_information.length, 30);
+});
