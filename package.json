@@ -1,0 +1,13 @@
+{
+  "name": "sentinel", "private": true, "type": "module",
+  "workspaces": ["spacetimedb", "dashboard"],
+  "scripts": {
+    "dev": "npm run dev -w dashboard",
+    "build": "npm run build -w dashboard",
+    "typecheck": "tsc -p spacetimedb && tsc -p dashboard",
+    "test": "tsx --test spacetimedb/tests/*.test.ts",
+    "test:integration": "tsx scripts/integration.ts",
+    "test:browser": "tsx scripts/browser.ts"
+  },
+  "devDependencies": {"typescript": "~5.9.3", "tsx": "^4.20.6", "@types/node": "^24.10.0", "@playwright/test": "^1.56.1"}
+}
