@@ -48,7 +48,8 @@ export function createApp(deps: AppDeps = {}) {
       throw err;
     }
 
-    const ds = createSnapshotDataSource(parsed.data, { staleAfterMinutes: config.staleAfterMinutes });
+    const staleAfterMinutes = parsed.data.stale_after_minutes ?? config.staleAfterMinutes;
+    const ds = createSnapshotDataSource(parsed.data, { staleAfterMinutes });
     // Default: multi-agent. `?mode=single` runs the original single-agent engine.
     const result =
       req.query.mode === "single"
@@ -57,7 +58,7 @@ export function createApp(deps: AppDeps = {}) {
             modelName: config.model,
             tools: createTools(ds),
             maxRounds: config.maxRounds,
-            staleAfterMinutes: config.staleAfterMinutes,
+            staleAfterMinutes,
           })
         : await runMultiAgentInvestigation(parsed.data, {
             supervisorModel: model,
@@ -65,7 +66,7 @@ export function createApp(deps: AppDeps = {}) {
             supervisorModelName: config.model,
             specialistModelName: config.specialistModel,
             dataSource: ds,
-            staleAfterMinutes: config.staleAfterMinutes,
+            staleAfterMinutes,
             maxDelegations: config.maxDelegations,
             maxSpecialistToolRounds: config.maxSpecialistToolRounds,
             maxVerificationRetries: config.maxVerificationRetries,

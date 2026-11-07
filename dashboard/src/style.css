@@ -867,3 +867,110 @@ footer {
   top: 0;
   z-index: 1;
 }
+
+/* ---- AI investigation panel (Feature 2 integration) ---- */
+.investigation {
+  margin: 0 0 25px;
+}
+.investigate-button {
+  background: #1c3a2f;
+  border-color: #2f6b55;
+}
+.inv-history {
+  display: block;
+  font-size: 11px;
+  color: #7d90a8;
+  margin-bottom: 14px;
+}
+.inv-history select {
+  margin-left: 6px;
+  max-width: 100%;
+}
+.inv-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.inv-badge {
+  font: 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #3c4a5c;
+  color: #c8d3df;
+}
+.status-completed { border-color: #2f6b55; color: #8fe0c2; }
+.status-running { border-color: #3d5d86; color: #9cc3f5; }
+.status-incomplete, .sev-warning { border-color: #6b5530; color: #edbf7f; }
+.status-failed, .sev-critical { border-color: #653443; color: #f994a0; }
+.sev-normal { border-color: #2f6b55; color: #8fe0c2; }
+.sev-unknown { border-color: #4a4f58; color: #a9b1bd; }
+.inv-meta {
+  font-size: 10px;
+  color: #7489a2;
+}
+.inv-running { color: #9cc3f5; font-size: 12px; }
+.inv-warning {
+  color: #edbf7f;
+  background: #29241d;
+  border: 1px solid #614b2f;
+  padding: 10px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+.inv-h {
+  font-size: 12px;
+  margin: 18px 0 6px;
+  color: #bcc9d8;
+}
+.inv-h small {
+  font-weight: 400;
+  color: #6e839c;
+  margin-left: 6px;
+}
+.inv-summary {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9d3de;
+  margin: 0;
+}
+.inv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.inv-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #bcc1ca;
+}
+.inv-list small { color: #7489a2; }
+.inv-list.facts { list-style: square; }
+.muted-item { color: #7489a2; }
+.ev { font-size: 10.5px; }
+.ev.plus { color: #8fe0c2; }
+.ev.minus { color: #f5a3ad; }
+.ev.missing { color: #edbf7f; }
+.inv-details {
+  margin-top: 16px;
+  font-size: 11px;
+  color: #bcc1ca;
+}
+.inv-details summary { cursor: pointer; color: #a8f1dd; }
+.inv-plan { color: #c9d3de; }
+.inv-finding { margin: 10px 0; }
+.inv-timeline {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  line-height: 1.6;
+}
+.inv-timeline code {
+  font: 9px "IBM Plex Mono", monospace;
+  color: #90a2b7;
+}
+@media (max-width: 900px) {
+  .inv-grid { grid-template-columns: 1fr; }
+}

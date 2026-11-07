@@ -35,13 +35,16 @@ import {
 
 // Import all reducer arg schemas
 import ChangeRackProfileReducer from "./change_rack_profile_reducer";
+import CompleteInvestigationReducer from "./complete_investigation_reducer";
 import IngestSimulatedObservationReducer from "./ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "./initialize_demo_reducer";
+import StartInvestigationReducer from "./start_investigation_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import CurrentTelemetryRow from "./current_telemetry_table";
+import InvestigationRow from "./investigation_table";
 import RackRow from "./rack_table";
 import RackAlertRow from "./rack_alert_table";
 import RackProfileRow from "./rack_profile_table";
@@ -65,6 +68,20 @@ const tablesSchema = __schema({
       { name: 'current_telemetry_current_key_key', constraint: 'unique', columns: ['currentKey'] },
     ],
   }, CurrentTelemetryRow),
+  investigation: __table({
+    name: 'investigation',
+    indexes: [
+      { accessor: 'investigationId', name: 'investigation_investigation_id_idx_btree', algorithm: 'btree', columns: [
+        'investigationId',
+      ] },
+      { accessor: 'rackId', name: 'investigation_rack_id_idx_btree', algorithm: 'btree', columns: [
+        'rackId',
+      ] },
+    ],
+    constraints: [
+      { name: 'investigation_investigation_id_key', constraint: 'unique', columns: ['investigationId'] },
+    ],
+  }, InvestigationRow),
   rack: __table({
     name: 'rack',
     indexes: [
@@ -123,8 +140,10 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("change_rack_profile", ChangeRackProfileReducer),
+  __reducerSchema("complete_investigation", CompleteInvestigationReducer),
   __reducerSchema("ingest_simulated_observation", IngestSimulatedObservationReducer),
   __reducerSchema("initialize_demo", InitializeDemoReducer),
+  __reducerSchema("start_investigation", StartInvestigationReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
