@@ -1,0 +1,28 @@
+{
+  "name": "sentinel",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "spacetimedb",
+    "dashboard"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w dashboard",
+    "build": "npm run build -w dashboard",
+    "typecheck": "tsc -p spacetimedb && tsc -p dashboard && tsc -p scripts",
+    "test": "tsx --test spacetimedb/tests/*.test.ts",
+    "test:integration": "tsx scripts/integration.ts",
+    "test:browser": "tsx scripts/browser.ts",
+    "db:start": "node scripts/spacetime.mjs start --listen-addr 127.0.0.1:3000 --data-dir .spacetime --non-interactive",
+    "db:build": "npm run typecheck && node scripts/spacetime.mjs build --module-path spacetimedb",
+    "db:publish": "node scripts/spacetime.mjs publish sentinel --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config",
+    "db:generate": "node scripts/spacetime.mjs generate --lang typescript --out-dir dashboard/src/module_bindings --module-path spacetimedb",
+    "db:verify:publish": "node scripts/spacetime.mjs publish sentinel-verification --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "tsx": "^4.20.6",
+    "@types/node": "^24.10.0",
+    "@playwright/test": "^1.56.1"
+  }
+}
