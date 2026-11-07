@@ -58,6 +58,8 @@ export const InvestigationRequest = z.object({
   active_alerts: z.array(ActiveAlert).max(50).default([]),
   /** Reference time for staleness. Defaults to server time when omitted. */
   as_of: z.iso.datetime({ offset: true }).optional(),
+  /** Freshness window for current readings. Defaults to STALE_AFTER_MINUTES. */
+  stale_after_minutes: z.number().positive().max(1440).optional(),
 });
 export type InvestigationRequest = z.infer<typeof InvestigationRequest>;
 

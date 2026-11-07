@@ -4,6 +4,7 @@ import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { DbConnection, tables } from "./module_bindings";
 import type { Rack } from "./module_bindings/types";
 import { metrics, date } from "./telemetry";
+import InvestigationPanel from "./InvestigationPanel";
 export default function RackView({
   rack,
   online,
@@ -297,6 +298,15 @@ export default function RackView({
           </div>
         </section>
       </div>
+      <InvestigationPanel
+        rack={rack}
+        profile={profiles.find((p) => p.profileId === rack.profileId)}
+        current={current}
+        history={history}
+        alerts={alerts}
+        ready={ready}
+        freshnessSeconds={freshness}
+      />
       <section className="panel history">
         <div className="panel-heading">
           <div>

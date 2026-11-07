@@ -7,6 +7,10 @@
   type InferSchema,
 } from "spacetimedb/server";
 import { validateObservation, evaluate, RECENT_LIMIT } from "./rules";
+import {
+  validateInvestigationStart,
+  validateInvestigationCompletion,
+} from "./investigation";
 
 const observationColumns = {
   observationId: t.u64().primaryKey().autoInc(),
@@ -77,6 +81,25 @@ const spacetimedb = schema({
       active: t.bool(),
       createdAt: t.timestamp(),
       resolvedAt: t.option(t.timestamp()),
+    },
+  ),
+  // AI investigation records (Feature 2). Client-submitted; see trust notes in README.
+  investigation: table(
+    { public: true },
+    {
+      investigationId: t.string().primaryKey(),
+      rackId: t.string().index("btree"),
+      profileId: t.string(),
+      profileName: t.string(),
+      telemetrySimulated: t.bool(),
+      status: t.string(),
+      severity: t.string(),
+      snapshotJson: t.string(),
+      reportJson: t.string(),
+      eventsJson: t.string(),
+      submittedBy: t.identity(),
+      createdAt: t.timestamp(),
+      completedAt: t.option(t.timestamp()),
     },
   ),
 });
@@ -217,5 +240,71 @@ export const changeRackProfile = spacetimedb.reducer(
     ctx.db.rack.rackId.update({ ...rack, profileId });
     for (const current of ctx.db.currentTelemetry.rackId.filter(rackId))
       reevaluate(ctx, rackId, current.metricType);
+  },
+);
+
+// ---- AI investigation records (Feature 2 integration) ----
+// Records are append-only history: one row per investigation, never overwritten after completion.
+export const startInvestigation = spacetimedb.reducer(
+  { investigationId: t.string(), rackId: t.string(), snapshotJson: t.string() },
+  (ctx, args) => {
+    const rack = ctx.db.rack.rackId.find(args.rackId);
+    if (!rack) throw new SenderError("Unknown rack");
+    if (ctx.db.investigation.investigationId.find(args.investigationId))
+      throw new SenderError("Investigation ID already exists");
+    try {
+      validateInvestigationStart(args);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    const profile = ctx.db.rackProfile.profileId.find(rack.profileId)!;
+    // Provenance is derived server-side from stored telemetry, not taken from the client.
+    const telemetrySimulated = [...ctx.db.currentTelemetry.rackId.filter(args.rackId)].every(
+      (c) => c.sourceType === "SIMULATOR",
+    );
+    ctx.db.investigation.insert({
+      investigationId: args.investigationId,
+      rackId: args.rackId,
+      profileId: profile.profileId,
+      profileName: profile.name,
+      telemetrySimulated,
+      status: "RUNNING",
+      severity: "UNKNOWN",
+      snapshotJson: args.snapshotJson,
+      reportJson: "{}",
+      eventsJson: "[]",
+      submittedBy: ctx.sender,
+      createdAt: ctx.timestamp,
+      completedAt: undefined,
+    });
+  },
+);
+export const completeInvestigation = spacetimedb.reducer(
+  {
+    investigationId: t.string(),
+    status: t.string(),
+    severity: t.string(),
+    reportJson: t.string(),
+    eventsJson: t.string(),
+  },
+  (ctx, args) => {
+    const row = ctx.db.investigation.investigationId.find(args.investigationId);
+    if (!row) throw new SenderError("Unknown investigation");
+    if (!row.submittedBy.isEqual(ctx.sender))
+      throw new SenderError("Only the identity that started an investigation can complete it");
+    if (row.status !== "RUNNING") throw new SenderError("Investigation is already complete");
+    try {
+      validateInvestigationCompletion(args);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    ctx.db.investigation.investigationId.update({
+      ...row,
+      status: args.status,
+      severity: args.severity,
+      reportJson: args.reportJson,
+      eventsJson: args.eventsJson,
+      completedAt: ctx.timestamp,
+    });
   },
 );
