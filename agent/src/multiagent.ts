@@ -78,7 +78,9 @@ const AGENT_PROMPTS: Record<AgentName, string> = {
   telemetry: `You are the TELEMETRY AGENT of SENTINEL, a data center investigation team.
 Your job: analyze current readings and history for one rack. Compare readings against the rack profile's warning and
 critical thresholds, compare readings across time, detect trends and sudden changes, and list missing or stale observations.
-Use your tools (get_current_telemetry, get_telemetry_history, get_rack_profile) to get the data; only call what your objective needs.
+Use your tools (get_current_telemetry, get_telemetry_history, get_rack_profile) to get the data.
+Start with get_current_telemetry WITHOUT metric_type so you see every available reading and which metrics are missing;
+report missing metrics explicitly. Then call only what your objective needs.
 ${SENSOR_RULES}
 ${FINDINGS_FORMAT}`,
 

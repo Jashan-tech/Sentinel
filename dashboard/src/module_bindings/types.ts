@@ -25,6 +25,23 @@ export const CurrentTelemetry = __t.object("CurrentTelemetry", {
 });
 export type CurrentTelemetry = __Infer<typeof CurrentTelemetry>;
 
+export const Investigation = __t.object("Investigation", {
+  investigationId: __t.string(),
+  rackId: __t.string(),
+  profileId: __t.string(),
+  profileName: __t.string(),
+  telemetrySimulated: __t.bool(),
+  status: __t.string(),
+  severity: __t.string(),
+  snapshotJson: __t.string(),
+  reportJson: __t.string(),
+  eventsJson: __t.string(),
+  submittedBy: __t.identity(),
+  createdAt: __t.timestamp(),
+  completedAt: __t.option(__t.timestamp()),
+});
+export type Investigation = __Infer<typeof Investigation>;
+
 export const Rack = __t.object("Rack", {
   rackId: __t.string(),
   profileId: __t.string(),

@@ -7,10 +7,14 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import ChangeRackProfileReducer from "../change_rack_profile_reducer";
+import CompleteInvestigationReducer from "../complete_investigation_reducer";
 import IngestSimulatedObservationReducer from "../ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "../initialize_demo_reducer";
+import StartInvestigationReducer from "../start_investigation_reducer";
 
 export type ChangeRackProfileParams = __Infer<typeof ChangeRackProfileReducer>;
+export type CompleteInvestigationParams = __Infer<typeof CompleteInvestigationReducer>;
 export type IngestSimulatedObservationParams = __Infer<typeof IngestSimulatedObservationReducer>;
 export type InitializeDemoParams = __Infer<typeof InitializeDemoReducer>;
+export type StartInvestigationParams = __Infer<typeof StartInvestigationReducer>;
 

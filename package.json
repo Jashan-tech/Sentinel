@@ -17,12 +17,13 @@
     "db:build": "npm run typecheck && node scripts/spacetime.mjs build --module-path spacetimedb",
     "db:publish": "node scripts/spacetime.mjs publish sentinel --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config",
     "db:generate": "node scripts/spacetime.mjs generate --lang typescript --out-dir dashboard/src/module_bindings --module-path spacetimedb",
-    "db:verify:publish": "node scripts/spacetime.mjs publish sentinel-verification --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config"
+    "db:verify:publish": "node scripts/spacetime.mjs publish sentinel-verification --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config",
+    "test:agent-e2e": "tsx scripts/agent-e2e.ts"
   },
   "devDependencies": {
-    "typescript": "~5.9.3",
-    "tsx": "^4.20.6",
+    "@playwright/test": "^1.56.1",
     "@types/node": "^24.10.0",
-    "@playwright/test": "^1.56.1"
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3"
   }
 }

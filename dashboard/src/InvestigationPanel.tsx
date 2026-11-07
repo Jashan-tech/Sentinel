@@ -153,7 +153,7 @@ export default function InvestigationPanel(props: {
       ) : !shown ? (
         <p className="muted">No investigations for this rack yet.</p>
       ) : (
-        <div className="inv-body" data-testid="investigation-record" data-status={shown.status} data-severity={shown.severity}>
+        <div className="inv-body" data-testid="investigation-record" data-id={shown.investigationId} data-status={shown.status} data-severity={shown.severity}>
           <div className="inv-status-row">
             <span className={`inv-badge status-${shown.status.toLowerCase()}`}>{abandoned ? "ABANDONED" : shown.status}</span>
             {shown.status !== "RUNNING" && <span className={`inv-badge sev-${shown.severity.toLowerCase()}`}>{shown.severity}</span>}

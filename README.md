@@ -129,3 +129,35 @@ Before implementation, the installed **2.14.1** CLI version, `init`, `build`, `p
 - [Subscriptions and lifecycle](https://spacetimedb.com/docs/clients/subscriptions/)
 
 No Feature 2 code, NVIDIA/Nemotron calls, AI orchestration, external infrastructure integrations, or cloud deployment is part of this implementation.
+
+## AI investigations (Feature 2 integration)
+
+The selected rack's dashboard has a **Run AI Investigation** panel. Clicking it:
+
+1. Takes one snapshot of the rack's subscribed rows. The rows come from the `rack`, `rack_profile`, `current_telemetry`, `recent_observation` and active `rack_alert` tables. `dashboard/src/investigation.ts` converts them to the agent's request format. It keeps the real units and timestamps, keeps missing readings missing, and sets `simulated` from `source_type`.
+2. Records a `RUNNING` row through the `start_investigation` reducer.
+3. POSTs the snapshot to `/api/agent/investigate`. Vite proxies that path to the Feature 2 agent on port 3001, so the NVIDIA key stays in `agent/.env` and never reaches the browser.
+4. Validates the response and stores it through `complete_investigation`. If the agent is unreachable, times out or returns an invalid response, the investigation is stored as `FAILED` with severity `UNKNOWN`.
+
+Every connected session reads the results from the public `investigation` table, so all of them show the same record. Each run is a new row, which keeps history. The existing telemetry tables and alert rules are unchanged. Investigations run only when someone clicks the button, never on telemetry updates.
+
+```bash
+# terminal 1: SpacetimeDB (port 3000), then build/publish/generate as above
+npm run db:start
+# terminal 2: agent (port 3001); needs agent/.env with NVIDIA_API_KEY
+cd agent && npm install && npm start
+# terminal 3: dashboard (port 5173)
+npm run dev
+# optional live end-to-end check (local Google Chrome, real Nemotron calls, uses Rack 01)
+npm run test:agent-e2e
+```
+
+**AI investigation trust model (local demo).** The dashboard client submits investigation records. SpacetimeDB checks each one:
+
+- The rack exists.
+- The JSON is well-formed and within the size limits.
+- The status and severity values are allowed, and they match the stored report.
+- Only the identity that started an investigation can complete it.
+- A record without an agent report can only be saved as `FAILED`/`UNKNOWN`.
+
+SpacetimeDB records the profile and the simulated flag itself, from its own tables. It does **not** check that a report really came from the agent service: any connected identity could submit a well-formed fake report. Treat AI reports as unauthenticated advisory output in this demo.
