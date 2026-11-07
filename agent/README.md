@@ -28,6 +28,7 @@ npm test && npm run typecheck
 | `PORT` | `3001` | |
 | `MAX_INVESTIGATION_ROUNDS` | `5` | Tool-execution rounds. Hard cap is 5 |
 | `MAX_OUTPUT_TOKENS` | `2048` | Cap per model call |
+| `NVIDIA_ENABLE_THINKING` | `false` | Sends `chat_template_kwargs.enable_thinking`. Reasoning text is never returned |
 | `STALE_AFTER_MINUTES` | `15` | Readings older than this, relative to `as_of`, are flagged stale |
 
 **Why `@langchain/openai`:** there is no JavaScript `@langchain/nvidia-ai-endpoints` package; it exists only for Python. NVIDIA's hosted API is OpenAI-compatible and supports `tools`, so we use `ChatOpenAI` with `baseURL` pointed at NVIDIA. The model is still Nemotron.

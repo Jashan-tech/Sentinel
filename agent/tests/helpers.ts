@@ -53,6 +53,7 @@ export const testConfig: AgentConfig = {
   maxRounds: 5,
   maxOutputTokens: 256,
   staleAfterMinutes: 15,
+  enableThinking: false,
 };
 
 export const fixture = (name: string) =>

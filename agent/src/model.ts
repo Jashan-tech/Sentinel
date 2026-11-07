@@ -10,6 +10,7 @@ export interface AgentConfig {
   maxRounds: number;
   maxOutputTokens: number;
   staleAfterMinutes: number;
+  enableThinking: boolean;
 }
 
 export const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
@@ -37,6 +38,7 @@ export function loadConfig(): AgentConfig {
     maxRounds: Math.min(intEnv("MAX_INVESTIGATION_ROUNDS", HARD_MAX_ROUNDS), HARD_MAX_ROUNDS),
     maxOutputTokens: intEnv("MAX_OUTPUT_TOKENS", 2048),
     staleAfterMinutes: intEnv("STALE_AFTER_MINUTES", 15),
+    enableThinking: process.env.NVIDIA_ENABLE_THINKING?.trim().toLowerCase() === "true",
   };
 }
 
@@ -53,5 +55,7 @@ export function createModel(cfg: AgentConfig): BaseChatModel {
     maxTokens: cfg.maxOutputTokens,
     timeout: 90_000,
     maxRetries: 1,
+    // Nemotron reasoning toggle. Off by default: reasoning tokens eat the output cap and are never shown.
+    modelKwargs: { chat_template_kwargs: { enable_thinking: cfg.enableThinking } },
   });
 }
