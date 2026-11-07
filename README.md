@@ -1,163 +1,240 @@
-﻿# SENTINEL — Feature 1
+﻿# SENTINEL
 
-Real-time data center environmental telemetry, backed by **SpacetimeDB 2.14.1** and a React + Vite + TypeScript dashboard. This feature contains deterministic monitoring rules, not AI diagnoses. No physical hardware or infrastructure integrations are implemented.
+**Autonomous data center inspection and failure prevention: live rack telemetry plus a team of AI agents that investigate the problems the telemetry reveals.**
 
-## Start locally (PowerShell)
+Built for HackUTD 2026, targeting three tracks:
 
-Prerequisites: installed SpacetimeDB CLI **2.14.1**, npm, and Node.js. The SDK's declared Node engine is `^22.23.4 || ^24.22.1 || >=26.12.1`; prefer a version satisfying it. The supplied Node **24.11.1** / npm **10.4.0** environment was used for the verification below, despite npm's engine warning. No Rust is required.
+| Track | How SENTINEL addresses it |
+|---|---|
+| **NorthMark Compute & Cloud (NMC²)** | Data center teams can detect threshold problems early, investigate them, and get evidence-backed next steps |
+| **NVIDIA: Nemotron Beyond a Chatbot** | A Supervisor and four specialist agents run on NVIDIA Nemotron. Each agent plans, calls tools and verifies its findings, rather than just answering a chat message |
+| **SpacetimeDB** | SpacetimeDB is the only backend. It holds telemetry, alerts, profiles and AI investigation records, and syncs them in real time to every connected dashboard |
 
-From `C:\Dev\SENTINEL`:
+All telemetry in this demo is **simulated**. The values match what the rover's sensors could actually measure. All rack thresholds are fictional demo settings, not manufacturer specifications.
 
-```powershell
-npm ci
-# Only if no SpacetimeDB server is already listening on port 3000:
-npm run db:start
+---
+
+## How it works
+
+```
+ Rover / simulator ──reducers──▶ ┌────────────────────────┐ ◀──subscriptions── Dashboard (React, :5173)
+                                 │  SpacetimeDB  (:3000)  │                        │
+                                 │  telemetry · alerts ·  │ ◀─start/complete────────┤  "Run AI Investigation"
+                                 │  profiles · AI reports │      investigation      │
+                                 └────────────────────────┘                         │ POST /api/agent/investigate
+                                                                                    ▼  (Vite proxy)
+                                                     Nemotron agent service (Express + LangGraph, :3001)
+                                                     Supervisor → Telemetry / Environment / Documentation → Verification
 ```
 
-In a second terminal:
+1. **Telemetry arrives.** The simulated rover submits readings through SpacetimeDB reducers. Readings are validated, stored and synced live.
+2. **Alerts fire.** Fixed threshold rules run inside SpacetimeDB and raise WARNING and CRITICAL alerts.
+3. **An operator starts an investigation.** On the dashboard, **Run AI Investigation** sends the selected rack's current data to the agent service.
+4. **The agents investigate.** A Nemotron Supervisor plans the work and delegates to specialist agents. They call read-only tools against that data, and a Verification agent checks their claims.
+5. **Everyone sees the result.** The report and execution timeline are saved in SpacetimeDB and appear in every open dashboard.
 
-```powershell
-cd C:\Dev\SENTINEL
-npm run db:build
-npm run db:publish
-npm run db:generate
-npm run dev
-```
+---
 
-Open **http://127.0.0.1:5173** in two separate browser sessions. The default database is `sentinel`. New databases seed three fictional profiles/racks and **zero readings**. There is no continuous simulator. Commit individual measurements using Submit; changing a text field alone sends nothing. Apply profile reevaluates existing current temperature/humidity against that profile's thresholds.
+## Quick start
 
-The CLI helper uses `SPACETIME_CLI` if set, otherwise the Windows `%LOCALAPPDATA%\SpacetimeDB\spacetime.exe` installation or `spacetime` on PATH. `db:start` binds to loopback and keeps persistent data in ignored `.spacetime/`. If using a different existing server data directory, continue using that server's start command. Do not run two servers on the same port or delete the data directory.
+### Prerequisites
+- Node.js 24 or later, and npm
+- SpacetimeDB CLI **2.14.1**. Install it with `curl -sSf https://install.spacetimedb.com | sh` (macOS/Linux) or the Windows installer, then add `~/.local/bin` to your `PATH`.
+- An NVIDIA API key from https://build.nvidia.com (free). Only the agent service needs it.
+- Google Chrome or Microsoft Edge, only for the automated browser tests.
 
-Optional dashboard settings are in `dashboard/.env.example`; copy to ignored `dashboard/.env.local` and restart Vite to override them. Freshness defaults to **60 seconds** and is selectable as 30, 60, or 300 seconds. This setting and form drafts are local UI preferences, not persisted telemetry. The one-second display timer updates observation ages locally; it never fetches data.
-
-## Architecture and files
-
-| File / directory                         | Responsibility                                                                     |
-| ---------------------------------------- | ---------------------------------------------------------------------------------- |
-| `spacetimedb/src/index.ts`               | Tables, idempotent seed, transactional ingestion, profile changes, alert lifecycle |
-| `spacetimedb/src/rules.ts`               | Strict measurement/provenance/time validation and threshold rules                  |
-| `spacetimedb/tests/rules.test.ts`        | Numeric, timestamp, unit, source, and threshold boundary tests                     |
-| `dashboard/src/App.tsx`                  | Connection status, rack selector, subscribed configuration                         |
-| `dashboard/src/RackView.tsx`             | Rack-scoped subscriptions, simulator forms, current values, alerts, recent history |
-| `dashboard/src/telemetry.ts`             | Presentation definitions for the four supported measurements                       |
-| `dashboard/src/module_bindings/`         | Official CLI-generated 2.14.1 client bindings; regenerate after module changes     |
-| `dashboard/src/main.tsx`, `style.css`    | Official SDK provider, responsive dark UI                                          |
-| `scripts/integration.ts`                 | Real backend reducer, validation, history, and two-client synchronization checks   |
-| `scripts/browser.ts`                     | Two independent Edge contexts exercising actual dashboard subscriptions            |
-| `scripts/spacetime.mjs`                  | Portable CLI lookup, without requiring a shell alias                               |
-| Root `package.json`, `package-lock.json` | npm workspaces, commands, reproducible dependency versions                         |
-
-SpacetimeDB is the sole backend and source of truth. Clients write through exported reducers and read through official SDK subscriptions. Each ingestion transaction validates input, appends the immutable private archive, maintains the bounded recent table, conditionally advances current state, and evaluates relevant alerts. A failed reducer commits none of these changes. There is no REST backend, additional WebSocket server, frontend polling, or fallback telemetry.
-
-Tables use camelCase accessors in TypeScript and generated snake_case SQL names. Keys and filters are indexed. `rack_profile` and `rack` store configuration; `telemetry_observation` is private, immutable historical storage. `current_telemetry` uses a stable `rackId:metricType` primary key; strictly newer observation times advance it. Delayed observations still enter history. Equal observation timestamps retain the first accepted current value. `ingested_at` always comes from `ctx.timestamp`, distinct from caller-provided `observed_at`. The backend records authenticated `ctx.sender` as `submitted_by`, never accepting an identity argument.
-
-### Bounded history and alert trade-offs
-
-The public `recent_observation` table is a transactional projection containing at most **50 observations per rack**, ordered by ingestion time with observation ID as a deterministic tie-breaker. Ingestion scans only that rack's maximum 51 recent rows before eviction, irrespective of archive size. It duplicates at most 50 rows per rack, keeping dashboard subscriptions bounded without relying on `ORDER BY ... LIMIT` subscription support. The private archive is never pruned or rewritten by application code. An owner can inspect it with CLI SQL; there is no full-history dashboard or public archive API in Feature 1.
-
-The dashboard subscribes to small configuration tables and rack-filtered current, recent, and alert tables using the generated query builder and `useTable`. The official hooks own subscription cleanup, including component unmounts on rack changes; the provider owns connection cleanup/reconnects. No subscription selects the unbounded archive. Readiness gates mutations during synchronization; promises resolve on backend acknowledgement before a committed message appears. Offline cached readings are marked Offline rather than presented as live data.
-
-`rack_alert` has one stable slot per rack/metric. Severity/message update without duplicating active alerts; recovery sets `active=false` and a server resolution time. A later episode reuses the slot with a new creation time. Complete alert episode history is not retained. Temperature has warning/critical thresholds, humidity has a high warning threshold; sound and distance have no alert rules. Profile changes reevaluate current values transactionally without rewriting observations. Freshness is shown independently and does not imply health, resolve an alert, or manufacture a missing reading.
-
-### Measurement and trust contract
-
-| Metric                      | Exact reducer unit | Validation                                | Real acquisition compatibility                                |
-| --------------------------- | ------------------ | ----------------------------------------- | ------------------------------------------------------------- |
-| `AMBIENT_TEMPERATURE_C`     | `°C`               | Finite, −50 through 100 °C                | Rover temperature sensor                                      |
-| `RELATIVE_HUMIDITY_PERCENT` | `%RH`              | Finite, 0 through 100                     | Rover humidity sensor                                         |
-| `SOUND_RAW`                 | `raw`              | Finite, 0 through JS maximum safe integer | Raw sound sensor output; **not calibrated decibels or audio** |
-| `ULTRASONIC_DISTANCE_CM`    | `cm`               | Finite, 0 through JS maximum safe integer | HC-SR04 distance measurement                                  |
-
-These are generic ingestion sanity bounds, not guarantees of sensor accuracy or specific hardware ranges; sensor models/calibration are not finalized. Ultrasound readings beyond a particular device's useful range require device-side handling in a later integration. No fan RPM, CPU, power, network, recorded audio, frequency analysis, camera, or fault classification data is invented.
-
-The only write path is `ingest_simulated_observation`, and **only `sourceType='SIMULATOR'` is accepted**. Unknown metrics/racks, mismatched units, invalid numeric values, negative raw/distance values, and source impersonation are rejected server-side. Source labels must be nonblank and at most 100 characters. Observation timestamps must be positive and at most **30 seconds ahead of server time**; old observations are deliberately allowed and shown stale. Clock synchronization is the local operator's responsibility.
-
-SpacetimeDB supplies each connection an authenticated identity. In this trusted **local demonstration**, any connected identity can submit simulated readings, change rack profiles, or invoke idempotent initialization. Source identifiers are user-supplied labels, not verified device identities; `submitted_by` supplies the actual caller provenance. Configuration, current values, bounded recent data, and alerts are publicly readable to connected clients. The immutable archive is private to module logic and the database owner. This is **not production access control**. Bind the local server to loopback; no production login or hardware authorization is claimed.
-
-Profiles A/B/C are Standard Network (32/40 °C, 70 %RH), High-Density Compute (27/33 °C, 60 %RH), and Industrial Network (40/50 °C, 80 %RH). Every threshold is a fictional demonstration configuration. Initialization inserts missing records only and does not overwrite a rack's selected profile or create readings.
-
-## Reproduce verification
-
-```powershell
-npm test
-npm run typecheck
-npm run build
-npm run db:build
-npm run db:publish
-# Dedicated test database; no writes to the main sentinel demonstration:
-npm run db:verify:publish
-npm run test:integration
-```
-
-Integration tests use two independent SDK connections and actual reducer calls. They check missing data on untouched rack 3, provenance, independent timestamps, invalid inputs, alert boundaries/recovery, profile reevaluation, idempotent seed, delayed/tied readings, transactional rejection, bounded recent eviction, and archive preservation through privileged CLI SQL. Run them against the dedicated `sentinel-verification` database; tests write rack 1 and retain test history. They can be repeated; don't manually write rack 3 in that database. `TEST_DATABASE`, `SPACETIME_URI`, and `SPACETIME_CLI` can override the integration target/tool. SQL archive checks expect the local server and CLI owner identity used to publish.
-
-For the browser check, leave the normal `npm run dev` on port 5173 and launch another terminal:
-
-```powershell
-$env:VITE_SPACETIME_DATABASE='sentinel-verification'
-npm run dev -w dashboard -- --port 5174
-```
-
-Then run in another terminal (installed Microsoft Edge is used; no browser download required):
-
-```powershell
-npm run test:browser
-```
-
-The script checks main demo rack 3's empty state, then uses port 5174 for mutations in the isolated database. It verifies two independent browser contexts synchronize temperature, alerts, profiles, and history; reload persistence; repeated rack switching; stale distance; offline/reconnect; and mobile overflow. Its offline step closes the actual test browser socket while network access is disabled, since Chromium offline emulation alone leaves established sockets open. All readings still come from the real SpacetimeDB server. Screenshots are saved to ignored `test-results/`. Do not manually populate demo rack 3 before running the empty-state assertion.
-
-Recorded verification on Windows: **29/29 rule tests**, **15/15 backend integration checks**, successful full TypeScript checks, Vite production build, SpacetimeDB module build/publication, and successful two-context Edge browser verification. The CLI's module build may print `tsc not found in node_modules` because TypeScript is hoisted to the workspace root; `db:build` explicitly runs all TypeScript checks first, including the server module. The npm SDK engine warning on Node 24.11.1 remains a compatibility limitation; use a declared-supported Node version for a new setup.
-
-### Manual two-browser checklist
-
-1. Open port 5173 in a normal window and a separate private window. Both must say Connected and show three racks. On a fresh database, all four cards say Unavailable.
-2. On Rack 01 / Standard profile, enter 32 °C and Submit. Both windows must show the simulated value, provenance, observation/ingestion times, a WARNING, and the observation in history. No value changes merely from typing.
-3. Submit 40 °C: one active temperature alert becomes CRITICAL. Select Industrial and Apply profile: both windows show that profile, and the existing 40 °C value becomes WARNING. Return to Standard and verify CRITICAL again.
-4. Submit 25 °C: the temperature alert resolves. Submit 70 %RH to create humidity WARNING, then 50 %RH to resolve it. Sound and distance submissions do not create diagnostic alerts.
-5. Submit an older temperature observation using Observation time: history grows while the newer current value remains. Leave one metric unobserved to confirm it stays Unavailable. An old distance reading becomes Stale. Change freshness threshold locally.
-6. Reload the other window: current state/history still come from SpacetimeDB. Switch racks repeatedly; no readings leak between racks. Stop/restart the local server using the same data directory: disconnected state disables writes, reconnection restores persisted state.
-7. Use `npm run test:integration` for authoritative server rejection of NaN/infinity, bad units/metrics/timestamps, unknown rack/profile, source impersonation, archive immutability, and recent-window eviction. Browser input validation is not the security boundary.
-
-## API compatibility references
-
-Before implementation, the installed **2.14.1** CLI version, `init`, `build`, `publish`, `generate`, and `sql --help` were inspected; server/client APIs were also checked against installed `spacetimedb@2.14.1` type declarations and generated bindings. Official documentation currently labels these pages as 2.0.0, so installed declarations were authoritative where details differed (for example `SubscriptionBuilder.onError` receives one context, and reducer calls return `Promise<void>`).
-
-- [Official TypeScript quickstart](https://spacetimedb.com/docs/quickstarts/typescript/)
-- [Tables and schema](https://spacetimedb.com/docs/tables/)
-- [Transactional reducers](https://spacetimedb.com/docs/functions/reducers/)
-- [TypeScript client and React integration](https://spacetimedb.com/docs/clients/typescript/)
-- [Subscriptions and lifecycle](https://spacetimedb.com/docs/clients/subscriptions/)
-
-No Feature 2 code, NVIDIA/Nemotron calls, AI orchestration, external infrastructure integrations, or cloud deployment is part of this implementation.
-
-## AI investigations (Feature 2 integration)
-
-The selected rack's dashboard has a **Run AI Investigation** panel. Clicking it:
-
-1. Takes one snapshot of the rack's subscribed rows. The rows come from the `rack`, `rack_profile`, `current_telemetry`, `recent_observation` and active `rack_alert` tables. `dashboard/src/investigation.ts` converts them to the agent's request format. It keeps the real units and timestamps, keeps missing readings missing, and sets `simulated` from `source_type`.
-2. Records a `RUNNING` row through the `start_investigation` reducer.
-3. POSTs the snapshot to `/api/agent/investigate`. Vite proxies that path to the Feature 2 agent on port 3001, so the NVIDIA key stays in `agent/.env` and never reaches the browser.
-4. Validates the response and stores it through `complete_investigation`. If the agent is unreachable, times out or returns an invalid response, the investigation is stored as `FAILED` with severity `UNKNOWN`.
-
-Every connected session reads the results from the public `investigation` table, so all of them show the same record. Each run is a new row, which keeps history. The existing telemetry tables and alert rules are unchanged. Investigations run only when someone clicks the button, never on telemetry updates.
-
+### First-time setup
 ```bash
-# terminal 1: SpacetimeDB (port 3000), then build/publish/generate as above
-npm run db:start
-# terminal 2: agent (port 3001); needs agent/.env with NVIDIA_API_KEY
-cd agent && npm install && npm start
-# terminal 3: dashboard (port 5173)
-npm run dev
-# optional live end-to-end check (local Google Chrome, real Nemotron calls, uses Rack 01)
-npm run test:agent-e2e
+npm ci                               # root workspaces: spacetimedb + dashboard
+cd agent && npm install && cd ..     # agent service
+cp agent/.env.example agent/.env     # then set NVIDIA_API_KEY=nvapi-... (never commit .env)
+
+npm run db:start                     # terminal 1: SpacetimeDB on 127.0.0.1:3000 (leave running)
+npm run db:build                     # terminal 2: typecheck + build the module
+npm run db:publish                   # publish database "sentinel"
+npm run db:generate                  # regenerate dashboard client bindings
 ```
 
-**AI investigation trust model (local demo).** The dashboard client submits investigation records. SpacetimeDB checks each one:
+### Run the app (three terminals)
+```bash
+npm run db:start                     # 1. SpacetimeDB          → :3000
+cd agent && npm start                # 2. Nemotron agent        → :3001
+npm run dev                          # 3. Dashboard             → http://127.0.0.1:5173
+```
 
-- The rack exists.
-- The JSON is well-formed and within the size limits.
-- The status and severity values are allowed, and they match the stored report.
-- Only the identity that started an investigation can complete it.
-- A record without an agent report can only be saved as `FAILED`/`UNKNOWN`.
+Data persists in `.spacetime/`, so you don't need to publish again on later runs. Start only one SpacetimeDB server on port 3000.
 
-SpacetimeDB records the profile and the simulated flag itself, from its own tables. It does **not** check that a report really came from the agent service: any connected identity could submit a well-formed fake report. Treat AI reports as unauthenticated advisory output in this demo.
+### Five-minute demo
+1. Open http://127.0.0.1:5173 in two browser windows, one normal and one private. Both should say **Connected**.
+2. Select **Rack 01** (Standard Network profile, 32 °C warning / 40 °C critical). Submit **41.5 °C**. Both windows show the reading and a **CRITICAL** alert.
+3. Click **Run AI Investigation**. Both windows show *Running*. After about 25–40 s, both show the same report: severity, diagnosis, measured facts, AI hypotheses, verification results, missing evidence, next inspections, and the agent timeline.
+4. Switch the profile to **Industrial** (40 °C warning / 50 °C critical) and click **Apply profile**. The alert drops to **WARNING**. Run another investigation: the new report reflects the new thresholds, and the first one is still in **History**.
+5. Notice that sound and distance were never submitted. They stay *Unavailable*, and the AI report lists them as missing rather than inventing values.
+
+---
+
+## The dashboard
+
+The app is one page. The left sidebar selects a rack, and every section updates for the selected rack.
+
+| Section | Purpose | Source |
+|---|---|---|
+| Rack header | Name, location, equipment type, profile, demo thresholds | Feature 1 |
+| Live telemetry cards | Temperature, humidity, sound (raw), ultrasonic distance. Each shows its source, observed and ingested times, and a Fresh / Stale / No data badge | Feature 1 |
+| Submit a simulated reading | Manual stand-in for the rover, one reading per submission. Also changes the rack profile | Feature 1 |
+| Active alerts | Fixed threshold rules evaluated inside SpacetimeDB. No AI | Feature 1 |
+| **AI investigation** | Run button, status and severity, final diagnosis, **measured facts** (copied from tool output) shown apart from **AI hypotheses**, verification results, missing evidence, recommendations, Supervisor plan, per-agent findings, execution timeline, history | Feature 2 |
+| Recent history | Last 50 observations for the rack | Feature 1 |
+
+---
+
+## The AI agents
+
+All five agents run on **NVIDIA Nemotron 3.5 Super** (`nvidia/nemotron-3.5-super-vl-120b-a12b`) through NVIDIA's hosted API. LangGraph routes between them, and all of them share one investigation state.
+
+| Agent | Role | Tools |
+|---|---|---|
+| **Supervisor** | Writes a plan, chooses the next specialist and task, reads the findings, decides when to stop, and writes the final report | none (delegates only) |
+| **Telemetry** | Compares readings to thresholds, finds trends and sudden changes, and flags missing or stale readings | `get_current_telemetry`, `get_telemetry_history`, `get_rack_profile` |
+| **Environment** | Looks at how temperature, humidity, sound and distance relate to each other | `get_current_telemetry`, `get_telemetry_history` |
+| **Documentation** | Looks up equipment reference docs. Separates manufacturer specs from fictional demo thresholds, and says plainly when specs are unavailable | `lookup_equipment_documentation`, `get_rack_profile` |
+| **Verification** | Checks the other agents' claims against the data on its own, and flags unsupported claims and contradictions. Can ask for a follow-up investigation | `get_current_telemetry`, `get_telemetry_history` |
+
+**The investigation adapts to the rack.** A normal rack usually gets one Telemetry check. A critical or contradictory rack gets three or four specialists, ending with Verification. The sequence is the Supervisor's own decision, not a fixed script.
+
+**Built-in safeguards**
+- Limits: at most 5 agent runs, 3 tool rounds per agent, 1 verification retry, and 90 s in total. Hitting any of them marks the report `INCOMPLETE`.
+- The Supervisor can't finish before any agent has examined the data. A non-normal rack must go through verification. Each time one of these rules steps in, it appears as a visible `GUARD` event in the timeline.
+- Severity follows the profile thresholds applied to fresh readings.
+- Malformed model output gets one repair attempt. An outright failure is marked `FAILED` and is never shown as a diagnosis.
+- No confidence percentages, no invented specs, and no claims of a confirmed hardware fault.
+
+The agent's API, configuration, tools and architecture are documented in [agent/README.md](agent/README.md).
+
+---
+
+## Data model (SpacetimeDB)
+
+| Table | Visibility | Contents |
+|---|---|---|
+| `rack_profile` | public | Demo threshold profiles: Standard Network 32/40 °C and 70 %RH, High-Density Compute 27/33 °C and 60 %RH, Industrial Network 40/50 °C and 80 %RH |
+| `rack` | public | Racks and their selected profile |
+| `telemetry_observation` | **private** | Full, unchangeable archive of every accepted observation |
+| `recent_observation` | public | Last 50 observations per rack |
+| `current_telemetry` | public | Latest reading per rack and metric, keyed `rackId:metricType` |
+| `rack_alert` | public | One alert slot per rack and metric: severity, message, active flag, resolution time |
+| `investigation` | public | One row per AI investigation: status, severity, the profile at run time, whether telemetry was simulated, the request snapshot, report JSON, events JSON, who submitted it, created and completed times |
+
+| Reducer | Purpose |
+|---|---|
+| `ingest_simulated_observation` | Validates and stores one reading, keeps the recent and current tables up to date, and re-evaluates alerts. All of it happens in one transaction |
+| `change_rack_profile` | Changes a rack's profile and re-evaluates its current values |
+| `initialize_demo` | Seeds missing demo profiles and racks. Safe to run more than once |
+| `start_investigation` | Records a `RUNNING` investigation. The server works out the profile and the simulated flag itself |
+| `complete_investigation` | Stores the final report and events after validating them |
+
+**Design notes (Feature 1)**
+- `ingested_at` always comes from the server clock. `observed_at` comes from the caller.
+- A delayed observation still enters history but never replaces a newer current value. When two readings share a timestamp, the first one is kept.
+- The recent table keeps 50 rows per rack, so dashboard subscriptions stay small. The private archive is never trimmed.
+- Changing a profile re-evaluates the current values without rewriting any observations.
+- Freshness is shown on its own. It never implies health, resolves an alert, or fills in a missing reading.
+
+---
+
+## Measurement and trust contract
+
+| Metric | Unit | Valid range | Real hardware it maps to |
+|---|---|---|---|
+| `AMBIENT_TEMPERATURE_C` | `°C` | −50 to 100 | Rover temperature sensor |
+| `RELATIVE_HUMIDITY_PERCENT` | `%RH` | 0 to 100 | Rover humidity sensor |
+| `SOUND_RAW` | `raw` | ≥ 0 | Raw sound level, **not calibrated decibels** |
+| `ULTRASONIC_DISTANCE_CM` | `cm` | ≥ 0 | HC-SR04 distance sensor |
+
+**Accepted readings**
+- Only `sourceType = SIMULATOR` is accepted.
+- Observation timestamps may be at most 30 s in the future.
+- Unknown metrics or racks, mismatched units, NaN or infinite values, and source impersonation are all rejected.
+
+**Never invented:** fan RPM, CPU, power, network errors, audio, camera data and fault classifications. The rover can't measure them, so neither the dashboard nor the agents claim to have them.
+
+**Access control (local demo only)**
+- Any connected identity can submit readings, change profiles, or start and complete investigations.
+- Source identifiers are labels supplied by the user. `submitted_by` records the identity that actually submitted.
+- This is not production access control. Keep the server bound to loopback.
+
+**AI investigation records**
+- SpacetimeDB checks each record before storing it:
+  - the rack exists
+  - the JSON is well-formed and within the size limits
+  - the status and severity values are allowed, and they match the report
+  - only the identity that started an investigation can complete it
+  - a record without an agent report can only be saved as `FAILED`/`UNKNOWN`
+- SpacetimeDB derives the profile and the simulated flag from its own tables.
+- It does **not** prove that a report came from the agent service, so treat AI reports as unauthenticated advisory output.
+- The NVIDIA key stays in `agent/.env` on the server, and the browser reaches the agent only through the Vite `/api/agent` proxy.
+
+---
+
+## Configuration
+
+| Where | Setting | Default |
+|---|---|---|
+| `agent/.env` | `NVIDIA_API_KEY` | required |
+| `agent/.env` | `NVIDIA_MODEL`, `NVIDIA_SPECIALIST_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` |
+| `agent/.env` | `MAX_DELEGATIONS`, `MAX_SPECIALIST_TOOL_ROUNDS`, `MAX_VERIFICATION_RETRIES`, `MAX_INVESTIGATION_SECONDS` | 5, 3, 1, 90 |
+| `dashboard/.env.local` | `VITE_SPACETIME_URI`, `VITE_SPACETIME_DATABASE` | `ws://127.0.0.1:3000`, `sentinel` |
+| environment | `AGENT_URL` (target of the Vite proxy) | `http://127.0.0.1:3001` |
+| environment | `SPACETIME_CLI` (CLI path, if not on PATH) | `spacetime` |
+
+The dashboard's freshness setting (30 s, 60 s or 5 min) is sent with each investigation, so the agents judge staleness by the same window the operator sees.
+
+---
+
+## Testing
+
+| Command | What it covers | Last result |
+|---|---|---|
+| `npm test` | SpacetimeDB rules and investigation-record validation | 31/31 pass |
+| `npm run typecheck` / `npm run build` | Module, dashboard and scripts / production dashboard build | pass |
+| `npm run db:verify:publish && npm run test:integration` | 15 checks against the real backend on the separate `sentinel-verification` database | 15/15 pass |
+| `npm run test:browser` | Feature 1 two-browser sync, reload, offline/reconnect, mobile layout. Needs Microsoft Edge and a second dev server on :5174 (see below) | pass (run on Chrome on macOS) |
+| `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with scripted models, and the dashboard-adapter contract checked against the agent's Zod schema | 35/35 pass |
+| `npm run test:agent-e2e` | **Live** end to end: two Chrome sessions, a critical reading on Rack 01, a real Nemotron multi-agent investigation, storage in SpacetimeDB checked over SQL, sync between sessions, profile change and rerun, missing data, and failure handling | all 14 steps pass |
+| `cd agent && npm run demo` | Live multi-agent runs on the sample scenarios (normal, critical, stale, contradictory) | pass |
+
+Browser test setup: keep `npm run dev` on 5173, then run `VITE_SPACETIME_DATABASE=sentinel-verification npm run dev -w dashboard -- --port 5174` in another terminal. In PowerShell, set it with `$env:VITE_SPACETIME_DATABASE='sentinel-verification'` first. That test expects demo **Rack 03** in the main database to have no readings, so leave it untouched.
+
+The module build may print `tsc not found in node_modules`. This is harmless: TypeScript is installed at the workspace root, and `db:build` runs all the type checks first.
+
+---
+
+## Repository layout
+
+```
+spacetimedb/          SpacetimeDB module: tables, reducers, rules, investigation validation, tests
+dashboard/            React + Vite dashboard
+  src/RackView.tsx            telemetry, simulator, alerts, history
+  src/InvestigationPanel.tsx  AI investigation panel
+  src/investigation.ts        adapter from SpacetimeDB rows to the agent request, plus response validation
+  src/module_bindings/        generated by `npm run db:generate` (do not edit)
+agent/                Nemotron multi-agent investigation service (see agent/README.md)
+scripts/              CLI helper, backend integration test, browser tests, live agent end-to-end test
+```
+
+---
+
+## Known limitations
+
+- All telemetry is simulated. Rover hardware, cameras and infrastructure integrations such as Redfish, IPMI or SNMP are not implemented.
+- The agent tools read the snapshot captured when you click Run. They don't query SpacetimeDB directly while the investigation runs.
+- AI reports are submitted by the client and are not cryptographically tied to the agent service. See the trust contract above.
+- An investigation takes about 25–40 s and nothing streams in the meantime. If a browser closes mid-run, the investigation shows as *Abandoned* after 5 minutes and stops blocking new runs.
+- The documentation set contains no real manufacturer manuals, so the agents report manufacturer specs as unavailable. The Industrial equipment type has no reference docs at all.
+- Access control is suitable only for a local demo.
+- `npm run test:browser` is hardcoded to Microsoft Edge.
+
+## References
+
+- SpacetimeDB: [TypeScript quickstart](https://spacetimedb.com/docs/quickstarts/typescript/) · [Tables](https://spacetimedb.com/docs/tables/) · [Reducers](https://spacetimedb.com/docs/functions/reducers/) · [TypeScript client](https://spacetimedb.com/docs/clients/typescript/) · [Subscriptions](https://spacetimedb.com/docs/clients/subscriptions/). Where these docs differed from the installed 2.14.1 type declarations, the declarations were followed.
+- NVIDIA hosted models: https://build.nvidia.com · LangGraph JS: https://langchain-ai.github.io/langgraphjs/
