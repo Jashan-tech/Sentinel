@@ -755,7 +755,7 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
 
 // ---- fixed demo route ----
 const ROUTE = {
-  forwardCm: Number(env("ROUTE_FORWARD_CM", "30")),
+  startCm: Number(env("ROUTE_START_CM", "45")), // drive until the box is this far (distance sensor), then start
   diagDeg: Number(env("ROUTE_DIAG_DEG", "45")),
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
   faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
@@ -775,8 +775,19 @@ async function showView(where: string, view: string, note: string, wires: boolea
 async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log(`ROUTE ${rackId}: ${why}`);
   phase("driving to rack", rackId);
-  log(`Driving ${ROUTE.forwardCm} cm straight toward the rack.`);
-  await fwd(cmToMs(ROUTE.forwardCm));
+  // Distance-sensor approach: get to exactly ROUTE.startCm from the box before the routine starts.
+  const d0 = (await sensors()).dist_cm;
+  log(`Box is ${d0 ?? "out of range"} cm away. Driving until it is ${ROUTE.startCm} cm.`);
+  if (d0 !== null && d0 < ROUTE.startCm - 3) {
+    await back(cmToMs(ROUTE.startCm - d0));
+  } else {
+    const r = await roverText(`/approach?target=${ROUTE.startCm}&speed=${APPROACH_SPEED}&max_ms=8000`, 20_000);
+    const ms = Number(r.match(/ms=(\d+)/)?.[1] ?? 0);
+    if (ms > 0) trail.push({ forward: ms });
+    if (!r.includes("reason=reached")) throw new Error(`could not reach ${ROUTE.startCm} cm from the box (${r})`);
+  }
+  await sleep(500);
+  log(`In position: ${(await sensors()).dist_cm} cm from the box.`);
   phase("inspecting the front", rackId);
   await showView("front", "front of the rack", "Front of the rack: solid panel, no wiring visible.", false);
   log("Front of the rack: solid panel, no wiring visible. Checking the left side.");
