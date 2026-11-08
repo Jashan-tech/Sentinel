@@ -158,9 +158,11 @@ function MissionControl() {
           <button className="rover-btn go" disabled={Boolean(err) || st?.running} onClick={() => void post("/patrol")}>
             Start Inspection
           </button>
-          <button className="rover-btn stop" disabled={Boolean(err)} onClick={() => void post("/stop")}>
-            Stop
-          </button>
+          {st?.running && (
+            <button className="rover-btn stop" onClick={() => void post("/stop")}>
+              Emergency Stop
+            </button>
+          )}
         </div>
       </div>
     </div>

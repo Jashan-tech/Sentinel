@@ -108,9 +108,11 @@ const status = {
   rack: null as string | null,
   log: [] as { t: string; m: string }[],
 };
-const log = (m: string) => {
+/** quiet=true: console only (technical startup lines stay off the dashboard). */
+const log = (m: string, quiet = false) => {
   const t = new Date().toLocaleTimeString();
   console.log(`[rover ${t}] ${m}`);
+  if (quiet) return;
   status.log.push({ t, m });
   if (status.log.length > 40) status.log.shift();
 };
@@ -562,11 +564,11 @@ async function driveLR(l: number, r: number, ms: number) {
 }
 
 // ---------------- main ----------------
-log(`rover ${ROVER_URL}`);
+log(`rover ${ROVER_URL}`, true);
 const ping = await roverText("/cmd?c=P").catch(() => roverText("/cmd?c=P"));
 if (!ping.includes("PONG")) log(`warning: motor board answered "${ping}"`);
 const db = await connect();
-log(`connected to SpacetimeDB ${DATABASE} as authorized agent`);
+log(`connected to SpacetimeDB ${DATABASE} as authorized agent`, true);
 
 if (MANUAL_RACK) {
   await run(`inspection of ${MANUAL_RACK}`, () => smartInspect(db, MANUAL_RACK, "manual dispatch"));
@@ -610,7 +612,7 @@ if (MANUAL_RACK) {
       return json(200, { stopping: true });
     }
     json(404, { error: "not found" });
-  }).listen(CONTROL_PORT, "127.0.0.1", () => log(`control API on http://127.0.0.1:${CONTROL_PORT}`));
+  }).listen(CONTROL_PORT, "127.0.0.1", () => log(`control API on http://127.0.0.1:${CONTROL_PORT}`, true));
 
   const lastMission = new Map<string, number>();
   const seen = new Set([...db.db.rackAlert.iter()].filter((a) => a.active).map((a) => `${a.alertId}:${a.severity}`));
@@ -690,7 +692,8 @@ if (MANUAL_RACK) {
       if (s.temp_c !== null && s.temp_c > TRIGGERS.temp_c) trigger(`temperature ${s.temp_c} °C is above ${TRIGGERS.temp_c} °C`, true);
     }
   }, 500);
-  log("dashboard alarms and simulated values always dispatch the rover");
-  log(`live-sensor auto-checks ${status.armed ? "ON" : "OFF"}: temp > ${TRIGGERS.temp_c} °C, humidity > ${TRIGGERS.humidity_pct}%, sudden sound > ${TRIGGERS.sound_factor}x background (min ${TRIGGERS.sound_min})`);
-  log("watching for alerts (Ctrl+C to stop)");
+  log("dashboard alarms and simulated values always dispatch the rover", true);
+  log("Rover ready.");
+  log(`live-sensor auto-checks ${status.armed ? "ON" : "OFF"}: temp > ${TRIGGERS.temp_c} °C, humidity > ${TRIGGERS.humidity_pct}%, sudden sound > ${TRIGGERS.sound_factor}x background (min ${TRIGGERS.sound_min})`, true);
+  log("watching for alerts (Ctrl+C to stop)", true);
 }
