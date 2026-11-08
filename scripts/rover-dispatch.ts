@@ -595,20 +595,28 @@ async function turnDeg(dir: "left" | "right", deg: number) {
 /** Turn in small steps until the box is centred in the camera. `hint` = which way to turn if the box is out of view. */
 async function centre(where: string, hint: "left" | "right" | null = null): Promise<Look> {
   let l = await lookAndLog(where);
+  let seen: Look | null = null; // last look where the box was in view
   for (let i = 0; i < 4; i++) {
     checkAbort();
     if (!l.rack_visible || l.x === null) {
+      if (seen) {
+        // our correction lost the box: undo it and use the last good view
+        log("Turned past the box; turning back to where it was in view.");
+        await undoLast(); await sleep(350);
+        return seen;
+      }
       if (!hint) return l;
       log(`Box out of view; turning ${hint} to find it.`);
-      await turnDeg(hint, 25);
+      await turnDeg(hint, 20);
     } else {
       const errDeg = (l.x - 0.5) * FOV_DEG;
-      if (Math.abs(errDeg) < 7) return l;
-      await turnDeg(errDeg > 0 ? "right" : "left", Math.abs(errDeg) * 0.9);
+      if (Math.abs(errDeg) < 8) return l;
+      seen = l;
+      await turnDeg(errDeg > 0 ? "right" : "left", Math.min(12, Math.abs(errDeg) * 0.6)); // small, careful steps
     }
     l = await lookAndLog(`${where} (re-centred)`);
   }
-  return l;
+  return l.rack_visible ? l : seen ?? l;
 }
 
 /** With the box centred, keep about STANDOFF_CM from it (distance sensor). */
