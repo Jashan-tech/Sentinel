@@ -330,8 +330,14 @@ async function fwd(ms: number) { trail.push({ forward: ms }); await drive(APPROA
 async function back(ms: number) { trail.push({ back: ms }); await drive(-APPROACH_SPEED, ms); }
 async function turn(dir: "left" | "right", ms: number) {
   trail.push({ turn: dir, ms });
+  await spin(dir, ms);
+}
+// Carpet makes the two directions uneven: left turns came up short, right turns went too far.
+const TURN_LEFT_SCALE = Number(env("ROVER_TURN_LEFT_SCALE", "1.2"));
+const TURN_RIGHT_SCALE = Number(env("ROVER_TURN_RIGHT_SCALE", "0.85"));
+async function spin(dir: "left" | "right", ms: number) {
   const sp = dir === "right" ? TURN_SPEED : -TURN_SPEED;
-  await driveLR(sp, -sp, ms);
+  return driveLR(sp, -sp, Math.round(ms * (dir === "right" ? TURN_RIGHT_SCALE : TURN_LEFT_SCALE)));
 }
 /** Undo the trail in reverse order (forward <-> back, left <-> right). */
 async function returnHome() {
@@ -343,10 +349,7 @@ async function returnHome() {
   for (const st of steps) {
     if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
     else if ("back" in st) await drive(APPROACH_SPEED, st.back);
-    else if ("turn" in st) {
-      const sp = st.turn === "right" ? -TURN_SPEED : TURN_SPEED;
-      await driveLR(sp, -sp, st.ms ?? TURN_MS);
-    }
+    else if ("turn" in st) await spin(st.turn === "right" ? "left" : "right", st.ms ?? TURN_MS);
     await sleep(250);
   }
   log("Back at the starting spot.");
@@ -528,10 +531,7 @@ async function undoLast() {
   if (!st) return;
   if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
   else if ("back" in st) await drive(APPROACH_SPEED, st.back);
-  else if ("turn" in st) {
-    const sp = st.turn === "right" ? -TURN_SPEED : TURN_SPEED;
-    await driveLR(sp, -sp, st.ms ?? TURN_MS);
-  }
+  else if ("turn" in st) await spin(st.turn === "right" ? "left" : "right", st.ms ?? TURN_MS);
 }
 
 /** Search pattern: look ahead; then left, back to center, right, back to center; then the same wider. */
@@ -812,6 +812,8 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log("Going back to the front.");
   while (trail.length > centreMark) { await undoLast(); await sleep(300); }
   await sleep(500);
+  phase("lining up with the front", rackId);
+  await centre("front"); // fix any drift so the right side starts straight
 
   // right side
   checkAbort();
