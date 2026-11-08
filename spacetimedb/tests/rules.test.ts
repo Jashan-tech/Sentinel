@@ -51,6 +51,11 @@ for (const [label, change] of Object.entries({
 }))
   test(`rejects ${label}`, () =>
     assert.throws(() => validateObservation({ ...valid, ...change }, now)));
+test("accepts ROVER only for an authorized agent identity", () => {
+  assert.doesNotThrow(() => validateObservation({ ...valid, sourceType: "ROVER" }, now, true));
+  assert.throws(() => validateObservation({ ...valid, sourceType: "ROVER" }, now, false));
+  assert.throws(() => validateObservation({ ...valid, sourceType: "REDFISH" }, now, true));
+});
 test("accepts delayed observations and exact future tolerance", () => {
   assert.doesNotThrow(() =>
     validateObservation({ ...valid, observedMicros: now - 90_000_000n }, now),

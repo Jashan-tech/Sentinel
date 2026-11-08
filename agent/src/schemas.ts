@@ -25,8 +25,9 @@ export const RackId = z
     "rack_id must be 1-64 chars of letters, digits, '.', '_' or '-'",
   );
 
-/** Database parity (spacetimedb/src/rules.ts): only SIMULATOR sources are authorized in this demonstration. */
-export const SOURCE_TYPES = ["SIMULATOR"] as const;
+/** Database parity (spacetimedb/src/rules.ts): SIMULATOR from any client; ROVER (real rover sensors)
+ *  only from an authorized agent identity, enforced by the database. */
+export const SOURCE_TYPES = ["SIMULATOR", "ROVER"] as const;
 /** Same tolerance the database applies to observation timestamps. */
 export const FUTURE_TOLERANCE_MS = 30_000;
 const EARLIEST_VALID_MS = Date.parse("2000-01-01T00:00:00Z");

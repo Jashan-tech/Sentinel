@@ -433,6 +433,9 @@ export const ingestSimulatedObservation = spacetimedb.reducer(
       validateObservation(
         { ...args, observedMicros: args.observedAt.microsSinceUnixEpoch },
         ctx.timestamp.microsSinceUnixEpoch,
+        // Real rover readings are accepted only from an authorized agent identity, so ordinary
+        // clients still cannot impersonate hardware.
+        isAuthorizedAgent(ctx, ctx.sender),
       );
     } catch (e) {
       throw new SenderError((e as Error).message);
@@ -440,7 +443,7 @@ export const ingestSimulatedObservation = spacetimedb.reducer(
     const row = ctx.db.telemetryObservation.insert({
       ...args,
       observationId: 0n,
-      sourceType: "SIMULATOR",
+      sourceType: args.sourceType,
       submittedBy: ctx.sender,
       ingestedAt: ctx.timestamp,
     });

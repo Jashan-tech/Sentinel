@@ -16,10 +16,14 @@ export function validateObservation(
     observedMicros: bigint;
   },
   now: bigint,
+  /** True only when the caller is an authorized agent identity (the rover dispatcher). */
+  allowRover = false,
 ) {
-  if (a.sourceType !== "SIMULATOR")
+  if (!(a.sourceType === "SIMULATOR" || (allowRover && a.sourceType === "ROVER")))
     throw new Error(
-      "Only SIMULATOR sources are authorized in this demonstration",
+      allowRover
+        ? "Only SIMULATOR and ROVER sources are accepted"
+        : "Only SIMULATOR sources are authorized for this identity (ROVER requires an authorized agent identity)",
     );
   if (!Object.prototype.hasOwnProperty.call(METRICS, a.metricType))
     throw new Error("Unsupported metric type");
