@@ -66,7 +66,7 @@ test("current telemetry retrieval preserves provenance and flags stale readings"
   assert.equal(c.readings.length, 1);
   const r = c.readings[0];
   assert.equal(r.numeric_value, 35.4);
-  assert.equal(r.unit, "C");
+  assert.equal(r.unit, "°C"); // database unit (fixtures were aligned with spacetimedb rules)
   assert.equal(r.source_type, "SIMULATOR");
   assert.equal(r.simulated, true);
   assert.ok(r.observed_at && r.ingested_at && r.source_identifier);

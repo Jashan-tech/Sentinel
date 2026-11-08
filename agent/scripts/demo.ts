@@ -124,6 +124,8 @@ for (const s of selected) {
   console.log(`\nTools executed (${r.tool_calls.length}):`);
   for (const c of r.tool_calls) console.log(`  ${c.agent ? `${c.agent}/` : ""}r${c.round}: ${c.tool}(${JSON.stringify(c.args)}) -> ${c.result_summary}`);
   console.log(`\nSEVERITY: ${r.severity}   STATUS: ${r.investigation_status}${r.limits_reached?.length ? `   LIMITS: ${r.limits_reached.join(", ")}` : ""}`);
+  console.log(`VERIFICATION: ${r.verification_outcome ?? "n/a"} (required: ${r.verification_required ?? "n/a"})`);
+  for (const reason of r.incomplete_reasons ?? []) console.log(`  incomplete: ${reason}`);
   console.log(`Model: ${r.model}\nSummary: ${r.summary}`);
   console.log("Hypotheses:");
   for (const h of r.hypotheses) {

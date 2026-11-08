@@ -12,6 +12,7 @@ import type {
   InvestigationImage,
 } from "./module_bindings/types";
 import {
+  VERIFICATION_LABEL,
   buildInvestigationRequest,
   snapshotForStorage,
   validateInvestigationResponse,
@@ -27,7 +28,7 @@ import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
 
 const AGENT_URL = "/api/agent/investigate"; // Vite proxy -> agent service (port 3001); no API key in the browser
-const CLIENT_TIMEOUT_MS = 150_000; // agent budget is 90 s plus synthesis
+const CLIENT_TIMEOUT_MS = 180_000; // includes visual investigation budget and synthesis
 const ABANDONED_AFTER_MS = 5 * 60_000; // RUNNING rows older than this no longer block new runs
 
 function parse<T>(json: string, fallback: T): T {
@@ -39,6 +40,11 @@ function parse<T>(json: string, fallback: T): T {
 }
 
 const micros = (r: Investigation) => r.createdAt.microsSinceUnixEpoch;
+const RECORDED_BY: Record<string, string> = {
+  AGENT: "Recorded by the authorized agent service",
+  CLIENT_ABANDONED: "Marked failed by the browser that started it",
+  DATABASE_EXPIRED: "Expired by the database (no completion recorded)",
+};
 const SOURCE_LABEL: Record<string, string> = {
   MANUAL_UPLOAD: "Manual upload",
   ONLINE_REFERENCE: "Online reference — not captured by SENTINEL",
@@ -68,6 +74,9 @@ export default function InvestigationPanel(props: {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [imageRows] = useTable(
     tables.investigationImage.where((r) => r.rackId.eq(rack.rackId)),
+  );
+  const [completionRows] = useTable(
+    tables.investigationCompletion.where((r) => r.rackId.eq(rack.rackId)),
   );
   // Image to inspect (local only until a run; bytes are sent to the agent, never stored).
   const [image, setImage] = useState<ImageAttachment | null>(null);
@@ -228,18 +237,20 @@ export default function InvestigationPanel(props: {
     }
     setSelectedId(investigationId);
 
-    let status = "FAILED";
-    let severity = "UNKNOWN";
-    let reportJson = "";
-    let eventsJson = "[]";
+    // The agent service runs on the snapshot stored above and records the report in SpacetimeDB itself
+    // (this browser cannot submit reports). We only send the id and the image bytes it must analyze.
+    let failure = "";
     try {
       setPhase(
-        "Nemotron is investigating. The execution timeline arrives with the saved report.",
+        "Nemotron is investigating. The agent service will record the result and timeline.",
       );
       const res = await fetch(AGENT_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(request),
+        body: JSON.stringify({
+          investigation_id: investigationId,
+          images: "images" in request && request.images ? request.images : [],
+        }),
         signal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),
       });
       const body = await res.json().catch(() => null);
@@ -249,15 +260,11 @@ export default function InvestigationPanel(props: {
             body?.error ??
             `Agent service returned HTTP ${res.status}`,
         );
-      const { report, events } = validateInvestigationResponse(
-        body,
-        rack.rackId,
-        Boolean(attached),
-      );
-      status = report.investigation_status;
-      severity = report.severity;
-      reportJson = JSON.stringify(report);
-      eventsJson = JSON.stringify(events);
+      validateInvestigationResponse(body, rack.rackId, Boolean(attached));
+      if (body.persisted !== true)
+        throw new Error(
+          `The agent finished but could not record the report: ${body.persist_error ?? "unknown error"}`,
+        );
     } catch (e) {
       const err = e as Error;
       const message =
@@ -266,27 +273,30 @@ export default function InvestigationPanel(props: {
           : err.message.includes("Failed to fetch")
             ? "Agent service is unreachable (is it running on port 3001?)"
             : err.message;
-      reportJson = JSON.stringify({ error: message });
+      failure = message;
       setLocalError(message);
     }
-    setPhase("Saving investigation result…");
-    try {
-      await db.reducers.completeInvestigation({
-        investigationId,
-        status,
-        severity,
-        reportJson,
-        eventsJson,
-      });
-    } catch (e) {
-      setLocalError(
-        `Investigation finished but could not be saved: ${(e as Error).message}`,
-      );
+    if (failure) {
+      // Only a FAILED / UNKNOWN record with no diagnosis. A no-op if the agent already recorded a result;
+      // if this also fails, the database expires the RUNNING row on its own.
+      try {
+        await db.reducers.abandonInvestigation({
+          investigationId,
+          reason: failure,
+        });
+      } catch (e) {
+        setLocalError(
+          `${failure} (could not mark it failed: ${(e as Error).message})`,
+        );
+      }
     }
     inFlight.current = false;
     setBusy(false);
   }
 
+  const shownCompletion = completionRows.find(
+    (r) => r.investigationId === shown?.investigationId,
+  );
   const report =
     shown && shown.status !== "RUNNING"
       ? parse<Partial<AgentReport> & { error?: string }>(shown.reportJson, {})
@@ -636,13 +646,30 @@ export default function InvestigationPanel(props: {
                 className={`review-badge ${reviewPassed(report) ? "review-passed" : ""}`}
                 data-testid="verification-status"
               >
-                {review}
+                {report?.verification_outcome ? (
+                  <span
+                    data-testid="verification-outcome"
+                    data-outcome={report.verification_outcome}
+                  >
+                    {review}
+                  </span>
+                ) : (
+                  review
+                )}
               </span>
             </div>
             <div className="report-time">
               <Icon name="clock" size={14} />
               <time>{date(shown.createdAt)}</time>
               {shownImage && <span>Photo included</span>}
+              {shownCompletion && (
+                <span
+                  data-testid="recorded-by"
+                  data-kind={shownCompletion.kind}
+                >
+                  {RECORDED_BY[shownCompletion.kind] ?? shownCompletion.kind}
+                </span>
+              )}
             </div>
             {shown.status === "RUNNING" ? (
               <div className="running-state">
@@ -742,9 +769,9 @@ export default function InvestigationPanel(props: {
                 events={events}
               />
               <p className="quiet-note">
-                Local demonstration: reports are submitted by the dashboard and
-                validated by SpacetimeDB; they are not cryptographically
-                attested agent output.
+                Reports are recorded by an authorized agent identity. Failed
+                runs may also be abandoned by their initiating browser or
+                expired by the database.
               </p>
             </details>
           </div>
@@ -799,7 +826,9 @@ export default function InvestigationPanel(props: {
 function reviewPassed(report: Partial<AgentReport> | null) {
   const v = report?.verification;
   return Boolean(
-    v &&
+    (!report?.verification_outcome ||
+      report.verification_outcome === "VERIFIED") &&
+      v &&
       v.status === "COMPLETED" &&
       v.grounded &&
       !v.unsupported_claims?.length &&
@@ -811,6 +840,11 @@ function reviewPassed(report: Partial<AgentReport> | null) {
   );
 }
 function verificationLabel(report: Partial<AgentReport> | null) {
+  if (
+    report?.verification_outcome &&
+    report.verification_outcome !== "VERIFIED"
+  )
+    return VERIFICATION_LABEL[report.verification_outcome];
   const v = report?.verification;
   if (!v) return "Verification not recorded";
   if (v.status === "FAILED") return "Verification failed";

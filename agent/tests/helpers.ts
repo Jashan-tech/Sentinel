@@ -5,17 +5,29 @@ import type { InvestigatorModel } from "../src/graph.js";
 import type { AgentConfig } from "../src/model.js";
 import { InvestigationRequest } from "../src/schemas.js";
 
-export type Step = AIMessage | Error | ((msgs: BaseMessage[]) => AIMessage);
+export type Step =
+  | AIMessage
+  | Error
+  | ((msgs: BaseMessage[], config?: { signal?: AbortSignal; timeout?: number }) => AIMessage | Promise<AIMessage>);
+
+/** A step that never answers until its call is aborted (simulates a hung NVIDIA request). */
+export const hang: Step = (_msgs, config) =>
+  new Promise<AIMessage>((_resolve, reject) => {
+    const sig = config?.signal;
+    if (!sig) return; // no signal: hangs forever (the bug this guards against)
+    if (sig.aborted) return reject(new Error("Request was aborted."));
+    sig.addEventListener("abort", () => reject(new Error("Request was aborted.")), { once: true });
+  });
 
 /** Scripted model: each invoke (tool-bound or not) consumes the next step. */
 export function fakeModel(steps: Step[]) {
   const calls: BaseMessage[][] = [];
-  const next = async (msgs: BaseMessage[]) => {
+  const next = async (msgs: BaseMessage[], config?: { signal?: AbortSignal; timeout?: number }) => {
     calls.push(msgs);
     const s = steps.shift();
     if (!s) throw new Error("fake model: no more scripted responses");
     if (s instanceof Error) throw s;
-    return typeof s === "function" ? s(msgs) : s;
+    return typeof s === "function" ? s(msgs, config) : s;
   };
   const model: InvestigatorModel = {
     bindTools: () => RunnableLambda.from(next) as any,
@@ -67,6 +79,7 @@ export const testConfig: AgentConfig = {
   maxSpecialistToolRounds: 3,
   maxVerificationRetries: 1,
   maxInvestigationSeconds: 90,
+  maxVisualInvestigationSeconds: 130,
   visionModel: "fake-nemotron-vl",
 };
 

@@ -535,8 +535,8 @@ export default function RackView({
             </table>
           </div>
           <p className="quiet-note">
-            Latest 50 observations per rack. Full history remains in
-            SpacetimeDB.
+            Up to 50 recent observations per rack, balanced across sensor
+            sources. Full history remains in SpacetimeDB.
           </p>
         </section>
       </details>

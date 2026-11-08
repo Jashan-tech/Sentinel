@@ -1,6 +1,6 @@
 ﻿import { chromium, expect } from "@playwright/test";
 import { mkdirSync } from "node:fs";
-const browser = await chromium.launch({ channel: "msedge", headless: true });
+const browser = await chromium.launch({ channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge", headless: true });
 const errors: string[] = [];
 try {
   const contexts = await Promise.all([

@@ -10,6 +10,14 @@ export const METRIC_TYPES = [
 export const MetricType = z.enum(METRIC_TYPES);
 export type MetricType = z.infer<typeof MetricType>;
 
+/** Units and accepted bounds per metric. Must equal spacetimedb/src/rules.ts METRICS (parity is tested). */
+export const METRIC_RULES = {
+  AMBIENT_TEMPERATURE_C: { unit: "°C", min: -50, max: 100 },
+  RELATIVE_HUMIDITY_PERCENT: { unit: "%RH", min: 0, max: 100 },
+  SOUND_RAW: { unit: "raw", min: 0, max: Number.MAX_SAFE_INTEGER },
+  ULTRASONIC_DISTANCE_CM: { unit: "cm", min: 0, max: Number.MAX_SAFE_INTEGER },
+} as const satisfies Record<MetricType, { unit: string; min: number; max: number }>;
+
 export const RackId = z
   .string()
   .regex(
@@ -17,31 +25,71 @@ export const RackId = z
     "rack_id must be 1-64 chars of letters, digits, '.', '_' or '-'",
   );
 
-export const TelemetryReading = z.object({
-  observation_id: z.string().min(1).max(128).optional(),
-  metric_type: MetricType,
-  numeric_value: z.number().finite(),
-  unit: z.string().min(1).max(16),
-  source_type: z.string().min(1).max(32), // e.g. SIMULATOR, ROVER
-  source_identifier: z.string().min(1).max(128),
-  observed_at: z.iso.datetime({ offset: true }),
-  ingested_at: z.iso.datetime({ offset: true }),
-  simulated: z.boolean(),
-});
+/** Database parity (spacetimedb/src/rules.ts): only SIMULATOR sources are authorized in this demonstration. */
+export const SOURCE_TYPES = ["SIMULATOR"] as const;
+/** Same tolerance the database applies to observation timestamps. */
+export const FUTURE_TOLERANCE_MS = 30_000;
+const EARLIEST_VALID_MS = Date.parse("2000-01-01T00:00:00Z");
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+export const TelemetryReading = z
+  .object({
+    observation_id: z.string().min(1).max(128).optional(),
+    metric_type: MetricType,
+    numeric_value: z.number().finite(),
+    unit: z.string().min(1).max(16),
+    source_type: z.enum(SOURCE_TYPES),
+    source_identifier: z
+      .string()
+      .max(100, "source_identifier must be at most 100 characters")
+      .refine((v) => v.trim().length > 0, "source_identifier must not be blank")
+      .refine((v) => !CONTROL_CHARS.test(v), "source_identifier contains control characters"),
+    observed_at: z.iso.datetime({ offset: true }),
+    ingested_at: z.iso.datetime({ offset: true }),
+    simulated: z.boolean(),
+  })
+  .superRefine((r, ctx) => {
+    // Exactly the database's sensor rules; invalid readings are rejected, never normalized.
+    const rule = METRIC_RULES[r.metric_type];
+    if (r.unit !== rule.unit)
+      ctx.addIssue({ code: "custom", path: ["unit"], message: `${r.metric_type} must use unit "${rule.unit}", got "${r.unit}"` });
+    if (r.numeric_value < rule.min || r.numeric_value > rule.max)
+      ctx.addIssue({ code: "custom", path: ["numeric_value"], message: `${r.metric_type} value ${r.numeric_value} is outside the accepted range ${rule.min}..${rule.max}` });
+    if (r.simulated !== (r.source_type === "SIMULATOR"))
+      ctx.addIssue({ code: "custom", path: ["simulated"], message: "simulated must be true exactly when source_type is SIMULATOR" });
+    const observed = Date.parse(r.observed_at);
+    const ingested = Date.parse(r.ingested_at);
+    if (observed < EARLIEST_VALID_MS || ingested < EARLIEST_VALID_MS)
+      ctx.addIssue({ code: "custom", path: ["observed_at"], message: "timestamps before 2000-01-01 are not valid observations" });
+    if (observed > ingested + FUTURE_TOLERANCE_MS)
+      ctx.addIssue({ code: "custom", path: ["observed_at"], message: "observed_at is later than ingested_at (beyond the 30 s tolerance)" });
+  });
 export type TelemetryReading = z.infer<typeof TelemetryReading>;
 
 /** Fictional demo thresholds — NOT manufacturer specifications. */
+const temperatureC = z
+  .number()
+  .finite()
+  .min(METRIC_RULES.AMBIENT_TEMPERATURE_C.min)
+  .max(METRIC_RULES.AMBIENT_TEMPERATURE_C.max);
 export const RackProfile = z
   .object({
     name: z.string().min(1).max(128),
-    temperature_warning_c: z.number().finite(),
-    temperature_critical_c: z.number().finite(),
+    temperature_warning_c: temperatureC,
+    temperature_critical_c: temperatureC,
     humidity_warning_percent: z.number().min(0).max(100).optional(),
     humidity_critical_percent: z.number().min(0).max(100).optional(),
   })
   .refine((p) => p.temperature_warning_c < p.temperature_critical_c, {
     message: "temperature_warning_c must be below temperature_critical_c",
-  });
+  })
+  .refine(
+    (p) =>
+      p.humidity_warning_percent === undefined ||
+      p.humidity_critical_percent === undefined ||
+      p.humidity_warning_percent < p.humidity_critical_percent,
+    { message: "humidity_warning_percent must be below humidity_critical_percent" },
+  );
 export type RackProfile = z.infer<typeof RackProfile>;
 
 export const ActiveAlert = z.object({
@@ -64,27 +112,50 @@ export const IMAGE_SOURCE_TYPES = [
 ] as const;
 
 /** One image supplied with an investigation. Bytes travel as base64; URLs are metadata only and are never fetched. */
+/** http(s) URL with a host, no credentials and no whitespace. Metadata only: never fetched. */
+const SourceUrl = z
+  .string()
+  .max(500)
+  .refine((v) => {
+    if (/\s/.test(v) || !/^https?:\/\//i.test(v)) return false;
+    try {
+      const u = new URL(v);
+      return (u.protocol === "http:" || u.protocol === "https:") && u.hostname.length > 0 && !u.username && !u.password;
+    } catch {
+      return false;
+    }
+  }, "source_url must be an http(s) URL with a host and no credentials");
+const ProvenanceText = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .refine((v) => !CONTROL_CHARS.test(v), "must not contain control characters");
+
 export const ImageInput = z.object({
   image_id: z
     .string()
     .regex(/^[A-Za-z0-9._-]{1,64}$/)
     .optional(),
-  filename: z.string().min(1).max(200),
+  filename: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((v) => !CONTROL_CHARS.test(v) && !/[\\/]/.test(v) && v.trim() !== "" && !/^\.+$/.test(v), "filename must be a plain file name (no path or control characters)"),
   mime_type: z.enum(["image/jpeg", "image/png"]),
   data_base64: z
     .string()
     .min(1)
     .max(Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 8),
   source_type: z.enum(IMAGE_SOURCE_TYPES),
-  /** Only when actually known (e.g. a camera clock). Never inferred. */
-  capture_timestamp: z.iso.datetime({ offset: true }).nullish(),
-  source_url: z
-    .string()
-    .max(500)
-    .regex(/^https?:\/\//, "source_url must be http(s)")
+  /** Only when actually known (e.g. a camera clock). Never inferred. Not in the future (server clock + 30 s). */
+  capture_timestamp: z.iso
+    .datetime({ offset: true })
+    .refine((v) => Date.parse(v) <= Date.now() + FUTURE_TOLERANCE_MS, "capture_timestamp cannot be in the future")
+    .refine((v) => Date.parse(v) >= EARLIEST_VALID_MS, "capture_timestamp is before 2000-01-01")
     .nullish(),
-  attribution: z.string().max(300).nullish(),
-  license: z.string().max(100).nullish(),
+  source_url: SourceUrl.nullish(),
+  attribution: ProvenanceText(300).nullish(),
+  license: ProvenanceText(100).nullish(),
 });
 export type ImageInput = z.infer<typeof ImageInput>;
 
@@ -132,6 +203,27 @@ export const InvestigationRequest = z.object({
   images: z.array(ImageInput).max(MAX_IMAGES).default([]),
   /** What the operator asked for. Informs the Supervisor; does not force any agent. */
   inspection_mode: z.enum(["TELEMETRY", "VISUAL", "COMBINED"]).optional(),
+}).superRefine((req, ctx) => {
+  // Timestamps must be consistent with the investigation's reference time (database tolerance: 30 s).
+  const asOf = req.as_of ? Date.parse(req.as_of) : Date.now();
+  if (req.as_of && asOf > Date.now() + 24 * 3600_000)
+    ctx.addIssue({ code: "custom", path: ["as_of"], message: "as_of is more than 24 h ahead of the server clock" });
+  for (const key of ["current_telemetry", "recent_telemetry"] as const)
+    req[key].forEach((r, i) => {
+      for (const field of ["observed_at", "ingested_at"] as const)
+        if (Date.parse(r[field]) > asOf + FUTURE_TOLERANCE_MS)
+          ctx.addIssue({ code: "custom", path: [key, i, field], message: `${field} is later than as_of (beyond the 30 s tolerance)` });
+    });
+  // One observation id must always describe the same reading.
+  const byId = new Map<string, string>();
+  [...req.current_telemetry, ...req.recent_telemetry].forEach((r) => {
+    if (!r.observation_id) return;
+    const sig = JSON.stringify([r.metric_type, r.numeric_value, r.unit, r.source_type, r.source_identifier, r.observed_at, r.simulated]);
+    const prev = byId.get(r.observation_id);
+    if (prev !== undefined && prev !== sig)
+      ctx.addIssue({ code: "custom", path: ["recent_telemetry"], message: `observation_id ${r.observation_id} is used for conflicting readings` });
+    byId.set(r.observation_id, sig);
+  });
 });
 export type InvestigationRequest = z.infer<typeof InvestigationRequest>;
 
@@ -356,6 +448,11 @@ export const Evidence = z.object({
 });
 export type Evidence = z.infer<typeof Evidence>;
 
+/** Verification quality, separate from processing completion (investigation_status). */
+export const VERIFICATION_OUTCOMES = ["VERIFIED", "NOT_GROUNDED", "INCOMPLETE", "FAILED", "NOT_RUN", "NOT_REQUIRED"] as const;
+export const VerificationOutcome = z.enum(VERIFICATION_OUTCOMES);
+export type VerificationOutcome = z.infer<typeof VerificationOutcome>;
+
 export const MultiAgentReport = DiagnosticReport.extend({
   tool_calls: z.array(AgentToolCallRecord),
   supervisor_plan: z.string(),
@@ -376,5 +473,12 @@ export const MultiAgentReport = DiagnosticReport.extend({
   visual_findings: z
     .array(VisualFinding.extend({ image_id: z.string() }))
     .default([]),
+  /** Whether policy required independent verification (image supplied, non-normal severity or early-warning trend). */
+  verification_required: z.boolean().default(false),
+  verification_outcome: VerificationOutcome.default("NOT_RUN"),
+  /** From the latest verification run; never upgraded by the synthesis. */
+  unsupported_claims: z.array(z.string()).default([]),
+  /** Why investigation_status is not COMPLETED (empty when COMPLETED). */
+  incomplete_reasons: z.array(z.string()).default([]),
 });
 export type MultiAgentReport = z.infer<typeof MultiAgentReport>;

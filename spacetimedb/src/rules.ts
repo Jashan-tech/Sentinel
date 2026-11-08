@@ -69,3 +69,32 @@ export function evaluate(
     };
   return undefined;
 }
+
+
+/**
+ * Fair eviction for recent_observation (issue 9). The per-rack bound stays RECENT_LIMIT, but the
+ * row evicted is the oldest row of the (metric, source) group holding the most rows, so a fast
+ * sensor cannot crowd a slow sensor (or another metric) out of the bounded history.
+ */
+export function fairEvictions<R extends { observationId: bigint; metricType: string; sourceIdentifier: string; ingestedMicros: bigint }>(
+  rows: readonly R[],
+  limit = RECENT_LIMIT,
+): bigint[] {
+  const groups = new Map<string, R[]>();
+  for (const r of rows) {
+    const k = JSON.stringify([r.metricType, r.sourceIdentifier]);
+    groups.set(k, [...(groups.get(k) ?? []), r]);
+  }
+  for (const g of groups.values())
+    g.sort((a, b) => (a.ingestedMicros < b.ingestedMicros ? -1 : a.ingestedMicros > b.ingestedMicros ? 1 : a.observationId < b.observationId ? -1 : 1));
+  const out: bigint[] = [];
+  let total = rows.length;
+  while (total > limit) {
+    let pick: R[] | undefined;
+    for (const g of groups.values())
+      if (g.length && (!pick || g.length > pick.length || (g.length === pick.length && g[0].ingestedMicros < pick[0].ingestedMicros))) pick = g;
+    out.push(pick!.shift()!.observationId);
+    total--;
+  }
+  return out;
+}

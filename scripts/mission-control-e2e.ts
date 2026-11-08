@@ -11,6 +11,8 @@ import { chromium, expect, type Page } from "@playwright/test";
 import { Timestamp } from "spacetimedb";
 import { createApp } from "../agent/src/app.js";
 import { createModel, loadConfig } from "../agent/src/model.js";
+import { createSpacetimeStore } from "../agent/src/persistence.js";
+import { registerAgent } from "./register-agent.mjs";
 import {
   fakeModel,
   testConfig,
@@ -18,6 +20,7 @@ import {
   jsonMessage as j,
 } from "../agent/tests/helpers.js";
 import { DbConnection } from "../dashboard/src/module_bindings/index.js";
+import { VERIFICATION_LABEL } from "../dashboard/src/investigation.js";
 const live = process.argv.includes("--live");
 const replay = process.argv
   .find((arg) => arg.startsWith("--replay="))
@@ -32,8 +35,18 @@ if (!/^sentinel-[a-z0-9-]*verification$/.test(database))
     "Mission-control tests require an isolated verification database",
   );
 const base = "http://127.0.0.1:5176";
+const agentIdentity = await registerAgent({
+  database,
+  label: "mission-control-e2e",
+});
+const store = createSpacetimeStore({
+  url: "http://127.0.0.1:3000",
+  database,
+  token: agentIdentity.token,
+});
 let serviceCalls = 0;
 const app = createApp({
+  store,
   getModel: () => {
     serviceCalls++;
     if (live) {
@@ -223,7 +236,7 @@ try {
     a.getByRole("button", { name: "Live", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(a.locator(".simulation-editor")).toHaveCount(0);
-  await a.getByLabel("Rack selector").selectOption("rack-2");
+  await a.getByLabel("Rack selector").selectOption("rack-3");
   await expect(a.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
     "Unavailable",
   );
@@ -378,6 +391,10 @@ try {
     "data-status",
     status!,
   );
+  await expect(record.getByTestId("recorded-by")).toHaveAttribute(
+    "data-kind",
+    "AGENT",
+  );
   const stored = await sql(
     `SELECT snapshot_json, report_json FROM investigation WHERE investigation_id = '${id}'`,
   );
@@ -406,7 +423,7 @@ try {
   assert.equal(report.severity, "CRITICAL");
   if (!live && !replay)
     await expect(record.getByTestId("verification-status")).toHaveText(
-      "Review concerns",
+      VERIFICATION_LABEL.NOT_GROUNDED,
     );
   if (live || replay) {
     assert(
@@ -491,7 +508,7 @@ try {
     "data-id",
     id,
   );
-  await a.getByLabel("Rack selector").selectOption("rack-2");
+  await a.getByLabel("Rack selector").selectOption("rack-3");
   await expect(a.getByTestId("investigation-record")).toHaveCount(0);
   await a.getByLabel("Rack selector").selectOption("rack-1");
   await b.reload();
@@ -505,7 +522,11 @@ try {
   // Explicit synthetic UI-state fixtures are isolated to the verification database.
   for (const v of [
     { status: "INCOMPLETE", grounded: true, label: "Verification incomplete" },
-    { status: "COMPLETED", grounded: false, label: "Review concerns" },
+    {
+      status: "COMPLETED",
+      grounded: false,
+      label: VERIFICATION_LABEL.NOT_GROUNDED,
+    },
   ]) {
     const fixtureId = randomUUID();
     await db.reducers.startInvestigation({
@@ -527,15 +548,21 @@ try {
         contradictions: [],
         request_more_investigation: false,
       },
-      investigation_status: "COMPLETED",
+      investigation_status: "INCOMPLETE",
+      verification_outcome:
+        v.status === "INCOMPLETE" ? "INCOMPLETE" : "NOT_GROUNDED",
+      incomplete_reasons: [
+        "UI TEST FIXTURE: review is incomplete or ungrounded",
+      ],
+      verified_findings: [],
     };
-    await db.reducers.completeInvestigation({
-      investigationId: fixtureId,
-      status: "COMPLETED",
-      severity: fixtureReport.severity,
-      reportJson: JSON.stringify(fixtureReport),
-      eventsJson: "[]",
-    });
+    await store.complete(
+      fixtureId,
+      "INCOMPLETE",
+      fixtureReport.severity,
+      JSON.stringify(fixtureReport),
+      "[]",
+    );
     await expect(a.getByTestId("investigation-record")).toHaveAttribute(
       "data-id",
       fixtureId,

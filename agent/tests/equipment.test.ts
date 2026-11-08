@@ -146,7 +146,8 @@ test("multiple sensors and simulated/real provenance are never merged into a ser
     sample(-120, 25),
     sample(-60, 30, "AMBIENT_TEMPERATURE_C", { source_identifier: "sensor-b" }),
     sample(0, 20, "AMBIENT_TEMPERATURE_C", {
-      source_type: "ROVER",
+      // The API rejects non-SIMULATOR sources; the trend engine still never merges provenance (defence in depth).
+      source_type: "ROVER" as unknown as "SIMULATOR",
       simulated: false,
     }),
   ]);

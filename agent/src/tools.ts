@@ -35,10 +35,12 @@ export interface RackDataSource {
     limit?: number,
   ): unknown;
   getRackProfile(rackId: string): unknown;
-  getTelemetryTrends(rackId: string, metricType?: MetricType): MetricTrend[];
+  /** sourceIdentifier filters the input BEFORE the per-metric source-series cap. */
+  getTelemetryTrends(rackId: string, metricType?: MetricType, sourceIdentifier?: string): MetricTrend[];
   getEarlyWarnings(
     rackId: string,
     metricType?: MetricType,
+    sourceIdentifier?: string,
   ): EarlyWarningIndicator[];
   lookupDocumentation(
     equipmentType: string,
@@ -57,6 +59,41 @@ function annotate(r: TelemetryReading, asOf: Date, staleAfterMin: number) {
   };
 }
 
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** History result whose statistics are computed from exactly the returned observations. */
+function historyResult<O extends TelemetryReading & { age_minutes: number }>(
+  rackId: string,
+  metricType: MetricType,
+  obs: O[],
+  totalAvailable: number,
+  requested: number,
+) {
+  const values = obs.map((o) => o.numeric_value);
+  return {
+    rack_id: rackId,
+    metric_type: metricType,
+    available: true,
+    order: "oldest_to_newest",
+    returned: obs.length,
+    total_available: totalAvailable,
+    truncated_oldest: requested - obs.length,
+    window: { from: obs[0].observed_at, to: obs[obs.length - 1].observed_at },
+    source_identifiers: [...new Set(obs.map((o) => o.source_identifier))],
+    stats: {
+      count: values.length,
+      first: values[0],
+      last: values[values.length - 1],
+      min: Math.min(...values),
+      max: Math.max(...values),
+      average: round2(values.reduce((a, b) => a + b, 0) / values.length),
+      change_first_to_last: round2(values[values.length - 1] - values[0]),
+    },
+    note: "Statistics describe exactly the returned observations (oldest to newest). Mixed sources are not a single series; use analyze_telemetry_trends for per-source trends.",
+    observations: obs,
+  };
+}
+
 export function createSnapshotDataSource(
   snapshot: InvestigationRequest,
   opts: { staleAfterMinutes: number },
@@ -70,6 +107,19 @@ export function createSnapshotDataSource(
   snap.as_of = asOf.toISOString();
   const trends = analyzeTrends(snap, opts.staleAfterMinutes).filter(t => equipmentMetric(t.metric_type));
   const indicators = earlyWarnings(snap, trends, opts.staleAfterMinutes).filter(i => equipmentMetric(i.metric));
+  // Per-source analysis on a source-filtered snapshot, so the 8-series cap never hides a requested source.
+  const bySource = new Map<string, { trends: MetricTrend[]; indicators: EarlyWarningIndicator[] }>();
+  const forSource = (sourceIdentifier: string) => {
+    let hit = bySource.get(sourceIdentifier);
+    if (!hit) {
+      const only = (rs: TelemetryReading[]) => rs.filter((r) => r.source_identifier === sourceIdentifier);
+      const sub: InvestigationRequest = { ...snap, current_telemetry: only(snap.current_telemetry), recent_telemetry: only(snap.recent_telemetry) };
+      const t = analyzeTrends(sub, opts.staleAfterMinutes).filter(t => equipmentMetric(t.metric_type));
+      hit = { trends: t, indicators: earlyWarnings(sub, t, opts.staleAfterMinutes).filter(i => equipmentMetric(i.metric)).filter(i => equipmentMetric(i.metric)) };
+      bySource.set(sourceIdentifier, hit);
+    }
+    return hit;
+  };
   const stale = opts.staleAfterMinutes;
 
   const checkRack = (rackId: string) => {
@@ -81,16 +131,18 @@ export function createSnapshotDataSource(
   };
 
   return {
-    getTelemetryTrends(rackId, metricType) {
+    getTelemetryTrends(rackId, metricType, sourceIdentifier) {
       checkRack(rackId);
+      const src = sourceIdentifier ? forSource(sourceIdentifier).trends : trends;
       return structuredClone(
-        trends.filter((t) => !metricType || t.metric_type === metricType),
+        src.filter((t) => !metricType || t.metric_type === metricType),
       );
     },
-    getEarlyWarnings(rackId, metricType) {
+    getEarlyWarnings(rackId, metricType, sourceIdentifier) {
       checkRack(rackId);
+      const src = sourceIdentifier ? forSource(sourceIdentifier).indicators : indicators;
       return structuredClone(
-        indicators.filter((i) => !metricType || i.metric === metricType),
+        src.filter((i) => !metricType || i.metric === metricType),
       );
     },
     lookupDocumentation(equipmentType, topic) {
@@ -120,9 +172,15 @@ export function createSnapshotDataSource(
     getTelemetryHistory(rackId, metricType, limit = DEFAULT_HISTORY_LIMIT) {
       checkRack(rackId);
       const n = Math.min(Math.max(1, Math.floor(limit)), MAX_HISTORY_LIMIT);
+      // Deterministic chronological order: observed time, then ingestion time, then id.
       const all = snap.recent_telemetry
         .filter((r) => r.metric_type === metricType)
-        .sort((a, b) => Date.parse(a.observed_at) - Date.parse(b.observed_at));
+        .sort(
+          (a, b) =>
+            Date.parse(a.observed_at) - Date.parse(b.observed_at) ||
+            Date.parse(a.ingested_at) - Date.parse(b.ingested_at) ||
+            (a.observation_id ?? "").localeCompare(b.observation_id ?? ""),
+        );
       if (all.length === 0) {
         return {
           rack_id: rackId,
@@ -133,28 +191,19 @@ export function createSnapshotDataSource(
         };
       }
       // History is old by definition: report age, but not a "stale" flag (that applies to current readings).
-      const obs = all.slice(-n).map((r) => {
+      const requested = all.slice(-n).map((r) => {
         const { stale: _ignored, ...rest } = annotate(r, asOf, stale);
         return rest;
       });
-      const values = obs.map((o) => o.numeric_value);
-      return {
-        rack_id: rackId,
-        metric_type: metricType,
-        available: true,
-        order: "oldest_to_newest",
-        returned: obs.length,
-        total_available: all.length,
-        stats: {
-          first: values[0],
-          last: values[values.length - 1],
-          min: Math.min(...values),
-          max: Math.max(...values),
-          change_first_to_last:
-            Math.round((values[values.length - 1] - values[0]) * 100) / 100,
-        },
-        observations: obs,
-      };
+      // Bound the size FIRST (dropping oldest), THEN compute statistics, so every number
+      // describes exactly the observations that are returned.
+      let obs = requested;
+      let result = historyResult(rackId, metricType, obs, all.length, requested.length);
+      while (JSON.stringify(result).length > MAX_TOOL_RESULT_CHARS && obs.length > 1) {
+        obs = obs.slice(1);
+        result = historyResult(rackId, metricType, obs, all.length, requested.length);
+      }
+      return result;
     },
 
     getRackProfile(rackId) {
@@ -171,29 +220,10 @@ export function createSnapshotDataSource(
   };
 }
 
-/**
- * Serialize a tool result within MAX_TOOL_RESULT_CHARS while keeping valid JSON:
- * oldest history observations are dropped first; anything else is replaced by an error.
- */
+/** Serialize a tool result within MAX_TOOL_RESULT_CHARS. Results are never truncated here
+ *  (that would desynchronize statistics from evidence); oversize results become an error. */
 function serialize(result: unknown): string {
-  let out = JSON.stringify(result);
-  const r = result as {
-    observations?: unknown[];
-    returned?: number;
-    truncated_oldest?: number;
-  };
-  let dropped = 0;
-  while (
-    out.length > MAX_TOOL_RESULT_CHARS &&
-    Array.isArray(r?.observations) &&
-    r.observations.length > 1
-  ) {
-    r.observations.shift();
-    dropped++;
-    r.returned = r.observations.length;
-    r.truncated_oldest = dropped;
-    out = JSON.stringify(r);
-  }
+  const out = JSON.stringify(result);
   if (out.length > MAX_TOOL_RESULT_CHARS) {
     return JSON.stringify({
       error: "Tool result too large; request fewer observations.",
@@ -259,16 +289,7 @@ export function createTools(ds: RackDataSource) {
     tool(
       ({ rack_id, metric_type, source_identifier }) =>
         run(() => ({
-          trends: ds
-            .getTelemetryTrends(rack_id, metric_type)
-            .map((t) => ({
-              ...t,
-              series: t.series.filter(
-                (s) =>
-                  !source_identifier ||
-                  s.source_identifier === source_identifier,
-              ),
-            })),
+          trends: ds.getTelemetryTrends(rack_id, metric_type, source_identifier),
           source_identifier_filter: source_identifier ?? null,
         })),
       {
@@ -290,10 +311,11 @@ export function createTools(ds: RackDataSource) {
       ({ rack_id, metric_type, source_identifier }) =>
         run(() => ({
           indicators: ds
-            .getEarlyWarnings(rack_id, metric_type)
+            .getEarlyWarnings(rack_id, metric_type, source_identifier)
             .filter(
               (i) =>
                 !source_identifier ||
+                i.observed_evidence.source_identifier == null ||
                 i.observed_evidence.source_identifier === source_identifier,
             ),
           source_identifier_filter: source_identifier ?? null,
