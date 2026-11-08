@@ -19,6 +19,9 @@ import {
 export const MAX_HISTORY_LIMIT = 50;
 export const DEFAULT_HISTORY_LIMIT = 10;
 export const MAX_TOOL_RESULT_CHARS = 8000;
+// Collision avoidance has its own UI/controller boundary, outside equipment reasoning.
+const EquipmentMetric = MetricType.exclude(["ULTRASONIC_DISTANCE_CM"]);
+const equipmentMetric = (metric: string) => metric !== "ULTRASONIC_DISTANCE_CM";
 
 /**
  * Read-only data access for one investigation. Implemented over the request snapshot
@@ -60,10 +63,13 @@ export function createSnapshotDataSource(
 ): RackDataSource {
   // Deep copy so the investigation can never mutate (or be affected by) the caller's object.
   const snap: InvestigationRequest = structuredClone(snapshot);
+  snap.current_telemetry = snap.current_telemetry.filter(r => equipmentMetric(r.metric_type));
+  snap.recent_telemetry = snap.recent_telemetry.filter(r => equipmentMetric(r.metric_type));
+  snap.active_alerts = snap.active_alerts.filter(a => !a.metric_type || equipmentMetric(a.metric_type));
   const asOf = new Date(snap.as_of ?? Date.now());
   snap.as_of = asOf.toISOString();
-  const trends = analyzeTrends(snap, opts.staleAfterMinutes);
-  const indicators = earlyWarnings(snap, trends, opts.staleAfterMinutes);
+  const trends = analyzeTrends(snap, opts.staleAfterMinutes).filter(t => equipmentMetric(t.metric_type));
+  const indicators = earlyWarnings(snap, trends, opts.staleAfterMinutes).filter(i => equipmentMetric(i.metric));
   const stale = opts.staleAfterMinutes;
 
   const checkRack = (rackId: string) => {
@@ -99,7 +105,7 @@ export function createSnapshotDataSource(
       const readings = snap.current_telemetry
         .filter((r) => !metricType || r.metric_type === metricType)
         .map((r) => annotate(r, asOf, stale));
-      const requested = metricType ? [metricType] : [...METRIC_TYPES];
+      const requested = metricType ? [metricType] : METRIC_TYPES.filter(equipmentMetric);
       const present = new Set(readings.map((r) => r.metric_type));
       return {
         rack_id: rackId,
@@ -218,7 +224,7 @@ export function createTools(ds: RackDataSource) {
           "Get the latest readings for a rack (optionally one metric), with units, timestamps, provenance, staleness, and a list of metrics with no current reading.",
         schema: z.object({
           rack_id: RackId,
-          metric_type: MetricType.optional().describe(
+          metric_type: EquipmentMetric.optional().describe(
             "Omit to get all available metrics",
           ),
         }),
@@ -233,7 +239,7 @@ export function createTools(ds: RackDataSource) {
           "Get recent historical observations (oldest to newest) of one metric for a rack, with simple stats for trend analysis.",
         schema: z.object({
           rack_id: RackId,
-          metric_type: MetricType,
+          metric_type: EquipmentMetric,
           limit: z
             .number()
             .int()
@@ -271,7 +277,7 @@ export function createTools(ds: RackDataSource) {
           "Deterministic per-source trend statistics, timestamps, data quality and fictional-profile threshold breaches for one metric. Never calculate numerical trends yourself.",
         schema: z.object({
           rack_id: RackId,
-          metric_type: MetricType,
+          metric_type: EquipmentMetric,
           source_identifier: z
             .string()
             .max(128)
@@ -298,7 +304,7 @@ export function createTools(ds: RackDataSource) {
           "Deterministic current conditions, early warnings and missing/stale evidence for one metric. Monitoring indicators, never confirmed faults or failure forecasts.",
         schema: z.object({
           rack_id: RackId,
-          metric_type: MetricType,
+          metric_type: EquipmentMetric,
           source_identifier: z
             .string()
             .max(128)

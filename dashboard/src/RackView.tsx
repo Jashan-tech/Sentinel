@@ -1,16 +1,21 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState, type ReactNode } from "react";
 import { Timestamp } from "spacetimedb";
 import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { DbConnection, tables } from "./module_bindings";
 import type { Rack } from "./module_bindings/types";
 import { metrics, date } from "./telemetry";
+import { evaluate, validateObservation } from "../../spacetimedb/src/rules";
 import InvestigationPanel from "./InvestigationPanel";
+import Icon, { type IconName } from "./Icon";
+
 export default function RackView({
   rack,
   online,
+  rackSelection,
 }: {
   rack: Rack;
   online: boolean;
+  rackSelection: ReactNode;
 }) {
   const state = useSpacetimeDB();
   const [current, currentReady] = useTable(
@@ -22,27 +27,63 @@ export default function RackView({
   const [alerts, alertsReady] = useTable(
     tables.rackAlert.where((r) => r.rackId.eq(rack.rackId)),
   );
-  const [profiles] = useTable(tables.rackProfile);
+  const [profiles, profilesReady] = useTable(tables.rackProfile);
+  const [mode, setMode] = useState<"live" | "simulation">("live");
   const [freshness, setFreshness] = useState(60);
   const [now, setNow] = useState(Date.now());
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [source, setSource] = useState("dashboard-demo");
   const [observedTime, setObservedTime] = useState("");
-  const [profileDraft, setProfileDraft] = useState(rack.profileId);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []); // Local age display only; no network reads.
-  useEffect(() => setProfileDraft(rack.profileId), [rack.profileId]);
+  }, []);
+  const profile = profiles.find((p) => p.profileId === rack.profileId);
+  const ready =
+    online && currentReady && historyReady && alertsReady && profilesReady;
+  const environmental = metrics.slice(0, 3);
+  const active = alerts.filter(
+    (a) =>
+      a.active &&
+      ["AMBIENT_TEMPERATURE_C", "RELATIVE_HUMIDITY_PERCENT"].includes(
+        a.metricType,
+      ),
+  );
+  const stale = (at: { microsSinceUnixEpoch: bigint }) =>
+    now - Number(at.microsSinceUnixEpoch / 1000n) > freshness * 1000;
+  const hasPhysical = current.some((r) => r.sourceType !== "SIMULATOR");
+  const level = !online
+    ? "unknown"
+    : active.some((a) => a.severity === "CRITICAL")
+      ? "critical"
+      : active.length
+        ? "warning"
+        : "neutral";
+  const complete = environmental.every((m) =>
+    current.some((r) => r.metricType === m.id && !stale(r.observedAt)),
+  );
+  const rackStatus = !ready
+    ? online
+      ? "Synchronizing"
+      : "Disconnected"
+    : active.length
+      ? "Issue detected"
+      : complete
+        ? "No threshold breach"
+        : "Incomplete telemetry";
+  const distance = current.find(
+    (r) => r.metricType === "ULTRASONIC_DISTANCE_CM",
+  );
+
   async function commit(action: (db: DbConnection) => Promise<void>) {
     const db = state.getConnection() as DbConnection | null;
-    if (!db || !online) return;
+    if (!db || !ready || pending) return;
     setPending(true);
-    setMessage("Waiting for backend acknowledgement…");
     setFailed(false);
+    setMessage("Waiting for backend acknowledgement…");
     try {
       await action(db);
       setMessage("Committed by SpacetimeDB.");
@@ -53,324 +94,454 @@ export default function RackView({
       setPending(false);
     }
   }
-  const active = alerts.filter((a) => a.active);
-  const ready = online && currentReady && historyReady && alertsReady;
-  return (
-    <>
-      <div className="section-heading">
-        <h2>
-          Live telemetry{" "}
-          <span className="live-tag">{online ? "● LIVE" : "○ OFFLINE"}</span>
-        </h2>
-        <label className="freshness-setting">
-          Stale after{" "}
-          <select
-            aria-label="Freshness threshold"
-            value={freshness}
-            onChange={(e) => setFreshness(Number(e.target.value))}
-          >
-            <option value={30}>30 seconds</option>
-            <option value={60}>60 seconds</option>
-            <option value={300}>5 minutes</option>
-          </select>
+  function simulationControl(m: (typeof metrics)[number]): ReactNode {
+    const reading = current.find((r) => r.metricType === m.id);
+    const editable = !reading || reading.sourceType === "SIMULATOR";
+    const value = drafts[m.id] ?? (reading ? String(reading.numericValue) : "");
+    const sliderMax =
+      m.id === "SOUND_RAW"
+        ? Math.max(1000, Number(value) || 0)
+        : m.id === "ULTRASONIC_DISTANCE_CM"
+          ? Math.max(400, Number(value) || 0)
+          : m.max;
+    return (
+      <form
+        className="simulation-control"
+        key={m.id}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!editable || drafts[m.id] === undefined || !value.trim()) return;
+          const args = {
+            rackId: rack.rackId,
+            metricType: m.id,
+            numericValue: Number(value),
+            unit: m.unit,
+            sourceType: "SIMULATOR",
+            sourceIdentifier: source,
+            observedAt: new Timestamp(
+              BigInt(
+                observedTime ? new Date(observedTime).getTime() : Date.now(),
+              ) * 1000n,
+            ),
+          };
+          void commit(async (db) => {
+            validateObservation(
+              { ...args, observedMicros: args.observedAt.microsSinceUnixEpoch },
+              BigInt(Date.now()) * 1000n,
+            );
+            await db.reducers.ingestSimulatedObservation(args);
+            setDrafts((old) => {
+              const next = { ...old };
+              delete next[m.id];
+              return next;
+            });
+          });
+        }}
+      >
+        <label htmlFor={`input-${m.id}`}>
+          {m.label}
+          <span>{m.unit}</span>
         </label>
-      </div>
-      <div className="metrics">
-        {metrics.map((m) => {
-          const reading = current.find((c) => c.metricType === m.id);
-          const stale =
-            reading &&
-            now - Number(reading.observedAt.microsSinceUnixEpoch / 1000n) >
-              freshness * 1000;
-          return (
-            <article className="metric-card" key={m.id} data-testid={m.id}>
-              <div className="metric-top">
-                <span className="metric-glyph">{m.glyph}</span>
-                <span
-                  className={`fresh-badge ${!online || stale ? "stale" : reading ? "fresh" : ""}`}
-                >
-                  {!online
-                    ? "Offline"
-                    : !currentReady
-                      ? "Syncing"
-                      : reading
-                        ? stale
-                          ? "Stale"
-                          : "Fresh"
-                        : "No data"}
+        <div className="simulation-inputs">
+          <input
+            type="range"
+            aria-label={`${m.label} slider`}
+            min={m.min}
+            max={sliderMax}
+            step={m.step === "any" ? "1" : m.step}
+            value={value || m.min}
+            disabled={!editable || pending || !ready}
+            onChange={(e) =>
+              setDrafts((old) => ({ ...old, [m.id]: e.target.value }))
+            }
+          />
+          <input
+            id={`input-${m.id}`}
+            aria-label={m.label}
+            type="number"
+            min={m.min}
+            max={m.max}
+            step={m.step}
+            required
+            placeholder="Set value"
+            value={value}
+            disabled={!editable || pending || !ready}
+            onChange={(e) =>
+              setDrafts((old) => ({ ...old, [m.id]: e.target.value }))
+            }
+          />
+          <button
+            disabled={
+              !ready ||
+              pending ||
+              !editable ||
+              drafts[m.id] === undefined ||
+              !value.trim() ||
+              !source.trim()
+            }
+            aria-label={`Apply ${m.label}`}
+          >
+            Apply
+          </button>
+        </div>
+        {!editable && (
+          <small className="warning-text">
+            Physical-source reading protected. Simulation cannot overwrite it.
+          </small>
+        )}
+      </form>
+    );
+  }
+  const telemetry = (
+    <>
+      <section
+        className="panel telemetry-card"
+        aria-labelledby="telemetry-title"
+      >
+        <div className="panel-heading">
+          <h2 id="telemetry-title">Live Telemetry</h2>
+          <span className="source-tag">
+            {current.length
+              ? current.every((r) => r.sourceType === "SIMULATOR")
+                ? "Simulated source"
+                : current.some((r) => r.sourceType === "SIMULATOR")
+                  ? "Mixed sources"
+                  : "Live source"
+              : "Awaiting data"}
+          </span>
+        </div>
+        <div className="telemetry-rows">
+          {environmental.map((m, i) => {
+            const reading = current.find((r) => r.metricType === m.id);
+            const violation =
+              reading && profile
+                ? evaluate(m.id, reading.numericValue, profile)
+                : undefined;
+            const old = reading && stale(reading.observedAt);
+            return (
+              <div
+                className={`telemetry-row ${violation?.severity.toLowerCase() ?? ""}`}
+                data-testid={m.id}
+                key={m.id}
+              >
+                <span className="metric-icon">
+                  <Icon
+                    name={
+                      (["temperature", "humidity", "sound"] as IconName[])[i]
+                    }
+                    size={23}
+                  />
                 </span>
-              </div>
-              <h3>{m.label}</h3>
-              <div className={`metric-value ${!reading ? "unavailable" : ""}`}>
-                {reading
-                  ? reading.numericValue.toLocaleString(undefined, {
-                      maximumFractionDigits: 3,
-                    })
-                  : currentReady
-                    ? "Unavailable"
-                    : "Syncing…"}
-                {reading && <span>{m.unit}</span>}
-              </div>
-              <div className="metric-meta">
-                {reading ? (
-                  <>
-                    <span className="sim-label">{reading.sourceType}</span>
-                    <span>{reading.sourceIdentifier}</span>
-                    <small>Observed {date(reading.observedAt)}</small>
-                    <small>Ingested {date(reading.ingestedAt)}</small>
-                  </>
-                ) : (
-                  <p>Awaiting an explicit simulated observation</p>
+                <div className="metric-label">
+                  <h3>{["Temperature", "Humidity", "Sound"][i]}</h3>
+                  <span>
+                    {!online
+                      ? "Disconnected"
+                      : !currentReady
+                        ? "Synchronizing"
+                        : reading
+                          ? `${reading.sourceType === "SIMULATOR" ? "Simulated" : "Live"} · ${old ? "Stale" : "Fresh"}`
+                          : "No observation"}
+                  </span>
+                </div>
+                <div
+                  className={`metric-value ${!reading ? "unavailable" : ""}`}
+                >
+                  {reading
+                    ? reading.numericValue.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })
+                    : currentReady
+                      ? "Unavailable"
+                      : "Syncing…"}
+                  {reading && <small>{m.unit}</small>}
+                </div>
+                {reading && (
+                  <div className="reading-provenance">
+                    <span>
+                      {reading.sourceIdentifier} · {reading.sourceType}
+                    </span>
+                    <time title={`Ingested ${date(reading.ingestedAt)}`}>
+                      Updated {date(reading.observedAt)}
+                    </time>
+                  </div>
                 )}
               </div>
-            </article>
-          );
-        })}
-      </div>
-      <div className="work-grid">
-        <section className="panel simulator">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">DEMONSTRATION WRITE PATH</span>
-              <h2>Submit a simulated reading</h2>
-            </div>
-            <span className="outline-tag">SIMULATOR</span>
-          </div>
-          <p className="muted">
-            One measurement per submission. Values are never generated
-            automatically.
-          </p>
-          <div className="source-fields">
-            <label>
-              Source identifier
-              <input
-                aria-label="Source identifier"
-                value={source}
-                maxLength={100}
-                required
-                onChange={(e) => setSource(e.target.value)}
-              />
-            </label>
-            <label>
-              Observation time <small>(blank = submit time)</small>
-              <input
-                aria-label="Observation time"
-                type="datetime-local"
-                step="1"
-                value={observedTime}
-                onChange={(e) => setObservedTime(e.target.value)}
-              />
-            </label>
-          </div>
-          {metrics.map((m) => (
-            <form
-              className="metric-input-row"
-              key={m.id}
-              onSubmit={(e) => {
-                e.preventDefault();
-                void commit((db) =>
-                  db.reducers.ingestSimulatedObservation({
-                    rackId: rack.rackId,
-                    metricType: m.id,
-                    numericValue: Number(drafts[m.id]),
-                    unit: m.unit,
-                    sourceType: "SIMULATOR",
-                    sourceIdentifier: source,
-                    observedAt: new Timestamp(
-                      BigInt(
-                        observedTime
-                          ? new Date(observedTime).getTime()
-                          : Date.now(),
-                      ) * 1000n,
-                    ),
-                  }),
-                );
-              }}
+            );
+          })}
+        </div>
+        <div className="telemetry-bottom">
+          <span>
+            <span className={`status-dot ${online ? "" : "inactive"}`} />
+            {online ? "Subscribed in real time" : "Connection unavailable"}
+          </span>
+          <label>
+            Stale after
+            <select
+              aria-label="Freshness threshold"
+              value={freshness}
+              onChange={(e) => setFreshness(Number(e.target.value))}
             >
-              <label htmlFor={`input-${m.id}`}>
-                {m.label}
-                <small>
-                  {m.id === "SOUND_RAW"
-                    ? "Raw sensor value · Not calibrated dB"
-                    : m.id === "ULTRASONIC_DISTANCE_CM"
-                      ? "HC-SR04 compatible measurement"
-                      : "Rover-compatible environmental measurement"}
-                </small>
-              </label>
-              <div className="value-input">
-                <input
-                  aria-label={m.label}
-                  id={`input-${m.id}`}
-                  type="number"
-                  min={m.min}
-                  max={m.max}
-                  step={m.step}
-                  placeholder="—"
-                  required
-                  value={drafts[m.id] ?? ""}
-                  onChange={(e) =>
-                    setDrafts({ ...drafts, [m.id]: e.target.value })
-                  }
-                />
-                <span>{m.unit}</span>
+              <option value={30}>30 sec</option>
+              <option value={60}>60 sec</option>
+              <option value={300}>5 min</option>
+            </select>
+          </label>
+        </div>
+        <div className="telemetry-mode">
+          <div className="segmented" aria-label="Telemetry mode">
+            <button
+              aria-pressed={mode === "live"}
+              onClick={() => setMode("live")}
+            >
+              Live
+            </button>
+            <button
+              aria-pressed={mode === "simulation"}
+              onClick={() => setMode("simulation")}
+            >
+              Simulation
+            </button>
+          </div>
+          <span>
+            {mode === "live"
+              ? "Read-only subscribed values"
+              : "Explicit simulated writes"}
+          </span>
+        </div>
+        {mode === "simulation" && (
+          <div className="simulation-editor">
+            <p className="muted">
+              Adjust a value, then Apply. Missing readings stay unavailable
+              until accepted by the backend. Sound is uncalibrated raw
+              intensity.
+            </p>
+            {environmental.map(simulationControl)}
+            <details className="advanced-settings">
+              <summary>Source &amp; observation time</summary>
+              <div className="source-fields">
+                <label>
+                  Source identifier
+                  <input
+                    aria-label="Source identifier"
+                    value={source}
+                    maxLength={100}
+                    required
+                    onChange={(e) => setSource(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Observation time <small>blank = submit time</small>
+                  <input
+                    aria-label="Observation time"
+                    type="datetime-local"
+                    step="1"
+                    value={observedTime}
+                    onChange={(e) => setObservedTime(e.target.value)}
+                  />
+                </label>
               </div>
-              <button disabled={!ready || pending || !source.trim()}>
-                Submit
-              </button>
-            </form>
-          ))}
-          <form
-            className="profile-form"
-            onSubmit={(e) => {
-              e.preventDefault();
+            </details>
+          </div>
+        )}
+      </section>
+      <section
+        className="safety-strip"
+        aria-label="Rover Safety"
+        data-testid="rover-safety"
+      >
+        <span className="safety-icon">
+          <Icon name="safety" size={23} />
+        </span>
+        <div>
+          <h2>Rover Safety</h2>
+          <p>
+            {distance
+              ? `${distance.sourceType === "SIMULATOR" ? "Simulated" : "Live"} distance · ${!online ? "Disconnected" : stale(distance.observedAt) ? "Stale" : "Fresh"}`
+              : "Distance unavailable"}
+          </p>
+        </div>
+        <div className="distance-value">
+          {distance ? (
+            <>
+              {distance.numericValue.toLocaleString()} <small>cm</small>
+            </>
+          ) : (
+            "—"
+          )}
+          <span>Controller not connected</span>
+        </div>
+        <p className="safety-note">
+          Collision safety only. Controller thresholds and motion state are
+          unavailable.
+        </p>
+        {mode === "simulation" && (
+          <details className="safety-simulator">
+            <summary>Simulate distance</summary>
+            {simulationControl(metrics[3])}
+          </details>
+        )}
+      </section>
+      {message && (
+        <div role="status" className={failed ? "error feedback" : "feedback"}>
+          {message}
+        </div>
+      )}
+    </>
+  );
+  return (
+    <>
+      <section
+        className="selection-bar"
+        aria-label="Selected rack configuration"
+      >
+        {rackSelection}
+        <label className="server-select">
+          <span>
+            Server profile <small>simulation configuration</small>
+          </span>
+          <select
+            aria-label="Server simulation profile"
+            value={rack.profileId}
+            disabled={!ready || pending || hasPhysical}
+            onChange={(e) => {
+              const profileId = e.target.value;
               void commit((db) =>
                 db.reducers.changeRackProfile({
                   rackId: rack.rackId,
-                  profileId: profileDraft,
+                  profileId,
                 }),
               );
             }}
           >
-            <label>
-              Selected rack profile
-              <select
-                aria-label="Selected rack profile"
-                value={profileDraft}
-                onChange={(e) => setProfileDraft(e.target.value)}
-              >
-                {profiles.map((p) => (
-                  <option key={p.profileId} value={p.profileId}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              disabled={!ready || pending || profileDraft === rack.profileId}
-            >
-              Apply profile
-            </button>
-          </form>
-          <div role="status" className={failed ? "error feedback" : "feedback"}>
-            {message || "Writes require a connected backend."}
+            {profiles.map((p) => (
+              <option key={p.profileId} value={p.profileId}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="profile-limits">
+          <span>Demo thresholds</span>
+          <p>
+            <b>{profile?.temperatureWarningC ?? "—"}°</b> warning <span>/</span>{" "}
+            <b>{profile?.temperatureCriticalC ?? "—"}°</b> critical{" "}
+            <span>·</span> <b>{profile?.humidityWarningPercent ?? "—"}%RH</b>{" "}
+            warning
+          </p>
+          <small>
+            Fictional settings · not manufacturer specifications or installed
+            identity
+          </small>
+        </div>
+        <div className={`rack-status ${level}`} data-testid="rack-status">
+          <span className="status-dot" />
+          <div>
+            <small>Current rack status</small>
+            <strong>{rackStatus}</strong>
           </div>
-        </section>
-        <section className="panel alerts">
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">DETERMINISTIC MONITORING</span>
-              <h2>Active alerts</h2>
-            </div>
-            <span className="count">
-              {active.length.toString().padStart(2, "0")}
-            </span>
-          </div>
-          <p className="muted">Threshold rules evaluated inside SpacetimeDB.</p>
-          {!alertsReady ? (
-            <p>Synchronizing alerts…</p>
-          ) : !active.length ? (
-            <div className="empty-alert">
-              <span>◇</span>
-              <h3>No active threshold alerts</h3>
-              <p>
-                Missing or stale readings do not establish equipment health.
-              </p>
-            </div>
+        </div>
+      </section>
+      <InvestigationPanel
+        rack={rack}
+        profile={profile}
+        current={current}
+        history={history}
+        alerts={alerts}
+        ready={ready}
+        freshnessSeconds={freshness}
+        telemetry={telemetry}
+      />
+      <details className="panel observation-details">
+        <summary>
+          <span>Observation history &amp; alerts</span>
+          <small>
+            {history.length} recent observations · {active.length} active alerts
+          </small>
+          <Icon name="chevron" size={16} />
+        </summary>
+        <div className="alerts">
+          <h3>Active environmental alerts</h3>
+          {!active.length ? (
+            <p className="muted">
+              No active threshold alerts. Missing or stale measurements do not
+              establish equipment health.
+            </p>
           ) : (
             active.map((a) => (
               <article
                 className={`alert-item ${a.severity.toLowerCase()}`}
                 key={a.alertId}
               >
-                <div>
-                  <span className="severity">{a.severity}</span>
-                  <span>
-                    {metrics.find((m) => m.id === a.metricType)?.label}
-                  </span>
-                </div>
+                <span className="severity">{a.severity}</span>
                 <p>{a.message}</p>
                 <time>{date(a.createdAt)}</time>
               </article>
             ))
           )}
-          <div className="alert-note">
-            Monitoring rules only. No AI diagnosis or repair recommendations.
-          </div>
-        </section>
-      </div>
-      <InvestigationPanel
-        rack={rack}
-        profile={profiles.find((p) => p.profileId === rack.profileId)}
-        current={current}
-        history={history}
-        alerts={alerts}
-        ready={ready}
-        freshnessSeconds={freshness}
-      />
-      <section className="panel history">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">OBSERVATION LOG</span>
-            <h2>Recent history</h2>
-          </div>
-          <span className="outline-tag">LATEST 50 / RACK</span>
         </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Measurement</th>
-                <th>Value</th>
-                <th>Source</th>
-                <th>Observed</th>
-                <th>Ingested</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...history]
-                .sort((a, b) => {
-                  const d =
-                    b.ingestedAt.microsSinceUnixEpoch -
-                    a.ingestedAt.microsSinceUnixEpoch;
-                  return d > 0n
-                    ? 1
-                    : d < 0n
-                      ? -1
-                      : a.observationId > b.observationId
-                        ? -1
-                        : 1;
-                })
-                .map((o) => (
-                  <tr key={o.observationId.toString()}>
-                    <td>{metrics.find((m) => m.id === o.metricType)?.label}</td>
-                    <td className="reading-cell">
-                      {o.numericValue} <span>{o.unit}</span>
-                    </td>
-                    <td>
-                      <span className="sim-label">SIMULATOR</span>
-                      <small>{o.sourceIdentifier}</small>
-                    </td>
-                    <td>{date(o.observedAt)}</td>
-                    <td>{date(o.ingestedAt)}</td>
-                  </tr>
-                ))}
-              {!history.length && (
+        <section className="history">
+          <h3>Recent history</h3>
+          <div className="table-scroll">
+            <table>
+              <thead>
                 <tr>
-                  <td className="empty-history" colSpan={5}>
-                    {historyReady
-                      ? "No observations yet. Submit a simulated reading to begin."
-                      : "Synchronizing observation history…"}
-                  </td>
+                  <th>Measurement</th>
+                  <th>Value</th>
+                  <th>Source</th>
+                  <th>Observed</th>
+                  <th>Ingested</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <p className="history-note">
-          Full immutable history remains in SpacetimeDB. This view is bounded by
-          ingestion order.
-        </p>
-      </section>
+              </thead>
+              <tbody>
+                {[...history]
+                  .sort((a, b) =>
+                    a.ingestedAt.microsSinceUnixEpoch >
+                    b.ingestedAt.microsSinceUnixEpoch
+                      ? -1
+                      : a.ingestedAt.microsSinceUnixEpoch <
+                          b.ingestedAt.microsSinceUnixEpoch
+                        ? 1
+                        : a.observationId > b.observationId
+                          ? -1
+                          : 1,
+                  )
+                  .map((o) => (
+                    <tr key={o.observationId.toString()}>
+                      <td>
+                        {metrics.find((m) => m.id === o.metricType)?.label ??
+                          o.metricType}
+                        {o.metricType === "ULTRASONIC_DISTANCE_CM" && (
+                          <small>Collision safety only</small>
+                        )}
+                      </td>
+                      <td className="reading-cell">
+                        {o.numericValue} {o.unit}
+                      </td>
+                      <td>
+                        <span className="source-tag">{o.sourceType}</span>
+                        <small>{o.sourceIdentifier}</small>
+                      </td>
+                      <td>{date(o.observedAt)}</td>
+                      <td>{date(o.ingestedAt)}</td>
+                    </tr>
+                  ))}
+                {!history.length && (
+                  <tr>
+                    <td colSpan={5} className="empty-history">
+                      No observations received.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="quiet-note">
+            Latest 50 observations per rack. Full history remains in
+            SpacetimeDB.
+          </p>
+        </section>
+      </details>
     </>
   );
 }

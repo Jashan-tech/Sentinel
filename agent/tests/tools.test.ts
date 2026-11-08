@@ -11,6 +11,19 @@ const toolMap = (req: InvestigationRequest): Record<string, StructuredToolInterf
 const call = async (req: InvestigationRequest, name: string, args: object) =>
   JSON.parse(String(await toolMap(req)[name].invoke(args as any)));
 
+test("equipment tools exclude collision-only readings, trends and missing-data indicators", async () => {
+  const req = fixture("a-normal");
+  const r = { ...req.current_telemetry[0], metric_type: "ULTRASONIC_DISTANCE_CM" as const, numeric_value: 3, unit: "cm" };
+  const ds = createSnapshotDataSource({ ...req, current_telemetry: [r], recent_telemetry: [r] }, opts);
+  const current = ds.getCurrentTelemetry(req.rack_id) as { readings: unknown[]; missing_metrics: string[] };
+  assert.deepEqual(current.readings, []);
+  assert(!current.missing_metrics.includes("ULTRASONIC_DISTANCE_CM"));
+  assert(!ds.getTelemetryTrends(req.rack_id).some(t => t.metric_type === "ULTRASONIC_DISTANCE_CM"));
+  assert(!ds.getEarlyWarnings(req.rack_id).some(i => i.metric === "ULTRASONIC_DISTANCE_CM"));
+  for (const t of (createTools(ds) as StructuredToolInterface[]).filter(t => t.name !== "get_rack_profile"))
+    await assert.rejects(() => t.invoke({ rack_id: req.rack_id, metric_type: "ULTRASONIC_DISTANCE_CM" }));
+});
+
 test("request validation: valid fixtures parse, unsupported metrics and bad bodies are rejected", () => {
   for (const f of ["a-normal", "b-elevated", "c-critical", "d-stale"]) assert.ok(fixture(f));
   const bad = rawFixture("c-critical");
@@ -36,7 +49,7 @@ test("missing telemetry stays missing", async () => {
   const req = InvestigationRequest.parse({ ...rawFixture("a-normal"), current_telemetry: [], recent_telemetry: [] });
   const cur = await call(req, "get_current_telemetry", { rack_id: req.rack_id });
   assert.deepEqual(cur.readings, []);
-  assert.equal(cur.missing_metrics.length, 4);
+  assert.equal(cur.missing_metrics.length, 3); // Collision distance is outside equipment reasoning.
   const hist = await call(req, "get_telemetry_history", { rack_id: req.rack_id, metric_type: "SOUND_RAW" });
   assert.equal(hist.available, false);
 });
@@ -60,7 +73,7 @@ test("current telemetry retrieval preserves provenance and flags stale readings"
   assert.equal(r.stale, false);
   const d = await call(fixture("d-stale"), "get_current_telemetry", { rack_id: "rack-sto-04" });
   assert.equal(d.readings[0].stale, true);
-  assert.deepEqual(d.missing_metrics, ["RELATIVE_HUMIDITY_PERCENT", "SOUND_RAW", "ULTRASONIC_DISTANCE_CM"]);
+  assert.deepEqual(d.missing_metrics, ["RELATIVE_HUMIDITY_PERCENT", "SOUND_RAW"]);
 });
 
 test("history is filtered by metric, ordered oldest->newest, and limited", async () => {

@@ -40,6 +40,12 @@ export function createApp(deps: AppDeps = {}) {
       return;
     }
 
+    // Distance is collision-only, including for direct API clients. The equipment graph
+    // must not receive it as a current reading, historical trend, or alert context.
+    parsed.data.current_telemetry = parsed.data.current_telemetry.filter(r => r.metric_type !== "ULTRASONIC_DISTANCE_CM");
+    parsed.data.recent_telemetry = parsed.data.recent_telemetry.filter(r => r.metric_type !== "ULTRASONIC_DISTANCE_CM");
+    parsed.data.active_alerts = parsed.data.active_alerts.filter(a => a.metric_type !== "ULTRASONIC_DISTANCE_CM");
+
     // Byte-level image validation (signature, decode, size, dimensions) before any model call.
     let images: AcceptedImage[] = [];
     try {

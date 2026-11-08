@@ -40,7 +40,8 @@ const SYSTEM_PROMPT = `You are SENTINEL, an autonomous data center investigation
 You investigate one rack using read-only tools, then a separate step writes the report.
 
 Available evidence comes ONLY from tool results. The rover can measure exactly:
-AMBIENT_TEMPERATURE_C, RELATIVE_HUMIDITY_PERCENT, SOUND_RAW, ULTRASONIC_DISTANCE_CM.
+AMBIENT_TEMPERATURE_C, RELATIVE_HUMIDITY_PERCENT, SOUND_RAW.
+Ultrasonic distance is exclusively collision safety, never equipment diagnosis or missing equipment evidence.
 Fan RPM, CPU load, power, switch errors and hardware health are NOT available.
 
 How to investigate:
@@ -51,8 +52,7 @@ How to investigate:
 - Stop calling tools when more evidence would not change your conclusion.
 
 Rules: never invent readings or manufacturer specifications. Ambient temperature alone does not prove a failed fan;
-SOUND_RAW is uncalibrated and alone does not identify a mechanical fault; ultrasonic distance alone does not prove
-an obstruction. Keep any text you write brief.`;
+SOUND_RAW is uncalibrated and alone does not identify a mechanical fault. Keep any text you write brief.`;
 
 const REPORT_PROMPT = `Investigation finished. Write the diagnostic report as a single JSON object and nothing else
 (no markdown fences, no commentary). Schema:
@@ -71,7 +71,7 @@ Requirements:
   otherwise NORMAL if fresh ambient temperature is available and in range; UNKNOWN if there is no fresh ambient temperature.
   A rising trend below the warning threshold does not raise severity; mention it in the summary and hypotheses instead.
 - Every supporting_evidence item must be an observation that actually points toward that hypothesis. A metric having a value
-  is not support by itself: a single ULTRASONIC_DISTANCE_CM reading without a baseline, or SOUND_RAW without a change over time,
+  is not support by itself: SOUND_RAW without a change over time,
   does not support a fault. Omit hypotheses that have no real supporting evidence.
 - If key evidence is missing or stale, say so in missing_evidence. Never call a rack NORMAL without fresh in-range readings.
 - Only describe inspections that tools actually performed; put physical checks in recommended_next_inspection.`;

@@ -53,7 +53,9 @@ export interface SnapshotInput {
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 4096;
 export type ImageSourceType =
-  "MANUAL_UPLOAD" | "ONLINE_REFERENCE" | "ROVER_CAMERA";
+  | "MANUAL_UPLOAD"
+  | "ONLINE_REFERENCE"
+  | "ROVER_CAMERA";
 export type InspectionMode = "TELEMETRY" | "VISUAL" | "COMBINED";
 
 /** A validated image ready to send. base64 is sent to the agent only; it is never stored. */
@@ -88,7 +90,9 @@ export function sniffImageType(
 export const toIso = (t: Ts) =>
   new Date(Number(t.microsSinceUnixEpoch / 1000n)).toISOString();
 
+// Ultrasonic distance belongs exclusively to collision safety, never equipment diagnosis.
 const supported = (m: string) =>
+  m !== "ULTRASONIC_DISTANCE_CM" &&
   (SUPPORTED_METRICS as readonly string[]).includes(m);
 
 function reading(r: ObservationRow) {
@@ -152,7 +156,7 @@ export function buildInvestigationRequest(
       )
       .map(reading),
     active_alerts: mine(s.alerts)
-      .filter((a) => a.active)
+      .filter((a) => a.active && supported(a.metricType))
       .map((a) => ({
         alert_id: a.alertId,
         severity: a.severity,
@@ -247,6 +251,7 @@ export interface AgentReport {
     tools_executed: unknown[];
   }[];
   verification: null | {
+    status?: "COMPLETED" | "INCOMPLETE" | "FAILED";
     grounded: boolean;
     verified_findings: string[];
     unsupported_claims: string[];
