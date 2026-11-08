@@ -780,6 +780,20 @@ async function showView(where: string, view: string, note: string, wires: boolea
   status.last_look = { t: new Date().toLocaleTimeString(), where, view, rack: true, full: true, wires, reason: note, img: await roverThumb() };
 }
 
+/** Ask Nemotron if the cabled rack is in view; if not, try small turns left/right (recorded, so home still works). */
+async function findWiresNearby(where: string): Promise<boolean> {
+  const step = Number(env("ROUTE_SCAN_DEG", "20"));
+  let at = 0; // current offset in degrees: negative = left
+  for (const target of [0, -step, -2 * step, step, 2 * step]) {
+    checkAbort();
+    if (target !== at) { const d = target - at; await turnDeg(d < 0 ? "left" : "right", Math.abs(d)); at = target; }
+    const l = await lookAndLog(target === 0 ? where : `${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
+    if (l.view === "OPEN_RACK_CABLES") return true;
+  }
+  if (at !== 0) await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
+  return false;
+}
+
 /** Predefined route: front, left side (no wires), back to centre, right side (wires: photo), back to start. */
 async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log(`ROUTE ${rackId}: ${why}`);
@@ -798,8 +812,8 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await sleep(500);
   log(`In position: ${(await sensors()).dist_cm} cm from the box.`);
   phase("inspecting the front", rackId);
-  await showView("front", "front of the rack", "Front of the rack: solid panel, no wiring visible.", false);
-  log("Front of the rack: solid panel, no wiring visible. Checking the left side.");
+  await lookAndLog("front"); // real AI view on the dashboard
+  log("Checking the left side.");
   await sleep(ROUTE.pauseMs);
   const centreMark = trail.length;
 
@@ -811,8 +825,8 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
   if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("left side", "right"); }
   phase("inspecting the left side", rackId);
-  await showView("left side", "left side of the rack", "Left side: no exposed wires on this side.", false);
-  log("Left side: no exposed wires on this side.");
+  const left = await lookAndLog("left side");
+  log(left.view === "OPEN_RACK_CABLES" ? "Left side: wiring visible here too." : "Left side: no exposed wires on this side.");
   await sleep(ROUTE.pauseMs);
 
   // back to the centre the same way
@@ -832,8 +846,8 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
   if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("right side", "left"); }
   phase("taking photo", rackId);
-  await showView("right side", "open rack with exposed cabling (TARGET)", "Right side: exposed wiring found. Taking the inspection photo.", true);
-  log("Right side: exposed wiring found. Taking the inspection photo.");
+  const found = await findWiresNearby("right side");
+  log(found ? "Right side: exposed wiring found. Taking the inspection photo." : "Right side: could not get the wiring in view; taking the photo anyway.");
   const image = await photo();
   log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
   phase("reading sensors", rackId);
