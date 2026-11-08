@@ -3,6 +3,7 @@ import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { tables } from "./module_bindings";
 import RackView from "./RackView";
 import FleetSimulation from "./FleetSimulation";
+import { RoverLive } from "./RoverLive";
 import Icon from "./Icon";
 import { catalogEntry } from "../../spacetimedb/src/equipmentCatalog";
 
@@ -11,7 +12,7 @@ export default function App() {
   const [racks, racksReady] = useTable(tables.rack);
   const [alerts] = useTable(tables.rackAlert);
   const [selected, setSelected] = useState("rack-1");
-  const [page, setPage] = useState<"rack" | "fleet">("rack");
+  const [page, setPage] = useState<"rack" | "rover" | "fleet">("rack");
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [wasConnected, setWasConnected] = useState(false);
   const [reconnectKey, setReconnectKey] = useState(0);
@@ -148,6 +149,14 @@ export default function App() {
             Rack Monitor
           </button>
           <button
+            aria-current={page === "rover" ? "page" : undefined}
+            onClick={() => setPage("rover")}
+          >
+            <Icon name="scan" size={17} />
+            Rover Live
+            <span className="nav-live-dot" aria-hidden />
+          </button>
+          <button
             aria-current={page === "fleet" ? "page" : undefined}
             onClick={() => setPage("fleet")}
           >
@@ -169,6 +178,8 @@ export default function App() {
         )}
         {page === "fleet" ? (
           <FleetSimulation />
+        ) : page === "rover" ? (
+          <RoverLive />
         ) : (
           <>
             {rack ? (

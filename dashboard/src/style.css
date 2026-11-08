@@ -2871,3 +2871,34 @@ html {
     width: 100%;
   }
 }
+
+/* ---------------- Rover Live ---------------- */
+:root { --rover-yellow: #f2c94c; }
+@keyframes rover-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@keyframes rover-glow {
+  0%, 100% { border-color: var(--rover-yellow); box-shadow: 0 0 0 1px var(--rover-yellow), 0 0 22px -4px var(--rover-yellow); }
+  50% { border-color: rgba(242, 201, 76, 0.25); box-shadow: 0 0 0 1px rgba(242, 201, 76, 0.15), 0 0 0 0 transparent; }
+}
+.nav-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--rover-yellow); margin-left: auto; animation: rover-blink 1.2s ease-in-out infinite; }
+.rover-live { display: flex; flex-direction: column; gap: 18px; }
+.rover-live-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rover-live-head h1 { margin: 0; }
+.rover-live-head .eyebrow { margin: 0 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
+.rover-live-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--rover-yellow); color: var(--rover-yellow); font-weight: 700; letter-spacing: 0.08em; font-size: 13px; }
+.rover-live-badge i { width: 10px; height: 10px; border-radius: 50%; background: var(--rover-yellow); animation: rover-blink 1s ease-in-out infinite; }
+.rover-live-badge.off { border-color: var(--red); color: var(--red); }
+.rover-live-badge.off i { background: var(--red); animation: none; }
+.rover-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 760px) { .rover-tiles { grid-template-columns: 1fr; } }
+.rover-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px 10px; transition: border-color 0.3s, background 0.3s; }
+.rover-tile.changed { border-color: var(--rover-yellow); background: rgba(242, 201, 76, 0.06); }
+.rover-tile-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
+.rover-tile-value { font-size: clamp(36px, 6vw, 56px); font-weight: 700; line-height: 1.1; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.rover-tile-value span { font-size: 0.4em; font-weight: 500; color: var(--muted); margin-left: 6px; }
+.rover-spark { width: 100%; height: 28px; display: block; }
+.rover-feed { position: relative; border: 3px solid var(--rover-yellow); border-radius: 14px; overflow: hidden; background: #000; animation: rover-glow 1.4s ease-in-out infinite; }
+.rover-feed.off { animation: none; border-color: var(--red); }
+.rover-feed img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; }
+.rover-feed-tag { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 7px; background: rgba(0, 0, 0, 0.65); color: var(--rover-yellow); padding: 5px 10px; border-radius: 8px; font-weight: 700; font-size: 12px; letter-spacing: 0.08em; }
+.rover-feed-tag i { width: 9px; height: 9px; border-radius: 50%; background: var(--rover-yellow); animation: rover-blink 1s ease-in-out infinite; }
+.rover-live-foot { color: var(--muted); font-size: 13px; margin: 0; }
