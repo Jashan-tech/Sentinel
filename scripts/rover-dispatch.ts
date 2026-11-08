@@ -77,11 +77,11 @@ const TRIGGERS = {
   sound_factor: Number(env("TRIGGER_SOUND_FACTOR", "3")), // ...and this many times the 30 s background median
 };
 // Box sweep geometry (calibrate on the floor): speed APPROACH_SPEED moves CM_PER_SEC; a 90° turn takes TURN90_MS.
-const CM_PER_SEC = Number(env("ROVER_CM_PER_SEC", "20"));
-const TURN90_MS = Number(env("ROVER_TURN90_MS", "700"));
+const CM_PER_SEC = Number(env("ROVER_CM_PER_SEC", "20.7")); // measured on the floor at speed 30
+const TURN90_MS = Number(env("ROVER_TURN90_MS", "525")); // 0.7 s turned ~120° on carpet -> 0.525 s for 90°
 const BOX_CM = Number(env("ROVER_BOX_CM", "30")); // box width/depth
 const SIDE_GAP_CM = Number(env("ROVER_SIDE_GAP_CM", "25")); // how far from a side face the rover stops to look
-const SWEEP_SIDES: ("left" | "right")[] = JSON.parse(env("ROVER_SWEEP_SIDES", '["right"]')); // left side has cables on the floor at the venue
+const SWEEP_SIDES: ("left" | "right")[] = JSON.parse(env("ROVER_SWEEP_SIDES", '["left", "right"]'));
 // Search turns (turn in place). SCAN_TURN_MS is roughly one box over; calibrate on the floor.
 const SCAN_TURN_MS = Number(env("ROVER_SCAN_TURN_MS", "400"));
 const SCAN_SCALES: number[] = JSON.parse(env("ROVER_SCAN_SCALES", "[1, 1.8]"));
@@ -606,12 +606,14 @@ async function sweepInspect(db: DbConnection, rackId: string, why: string) {
     log(`Driving around to the ${side} side of the rack...`);
     const n = await goToSide(side);
     l = await lookAndLog(`${side} side`);
-    if (l.view === "OPEN_RACK_CABLES" && !image) await take(`${side} side`);
-    else if (l.view !== "OPEN_RACK_CABLES") log(`${side} side is ${VIEW_LABEL[l.view]}: no photo.`);
+    const found = l.view === "OPEN_RACK_CABLES" && !image;
+    if (found) await take(`${side} side`);
+    else log(`${side} side is ${VIEW_LABEL[l.view]}: not the target, no photo.`);
     phase("back to the front", rackId);
     log("Going back to the front.");
     await undoMoves(n);
     await sleep(400);
+    if (image) break; // found it: no need to check the other side
   }
   await returnHome();
   if (image) await investigate(db, rackId, image);
