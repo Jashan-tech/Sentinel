@@ -464,7 +464,34 @@ const LOOK_PROMPT =
   "rack_x: horizontal centre of the rack / box in the frame, 0 = left edge, 0.5 = centre, 1 = right edge (null if none). " +
   "rack_w: the rack / box width as a fraction of the frame width (null if none). " +
   "reason: one short plain-English sentence explaining what you see.";
+/** Ask Nemotron about the current frame; retries if the network or the model's answer glitches. */
 async function look(): Promise<Look> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await lookOnce();
+    } catch (e) {
+      if (attempt >= 3) throw e;
+      log(`Vision check glitched (${(e as Error).message.slice(0, 80)}); retrying.`, true);
+      await sleep(500);
+    }
+  }
+}
+/** Pull the fields out of a JSON-ish reply, even when the model forgot a quote. */
+function parseLook(text: string): { view?: string; full_rack_visible?: boolean; reason?: string; rack_x?: unknown; rack_w?: unknown } {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch { /* fall through to field-by-field */ } }
+  const view = text.match(/(OPEN_RACK_CABLES|CLOSED_DOOR_RACK|BLANK_PANEL|NO_RACK)/)?.[1];
+  if (!view) throw new Error("vision reply had no view");
+  const numOf = (k: string) => { const v = text.match(new RegExp(`"${k}"\\s*:\\s*([0-9.]+)`))?.[1]; return v === undefined ? null : Number(v); };
+  return {
+    view,
+    full_rack_visible: /"full_rack_visible"\s*:\s*true/.test(text),
+    reason: text.match(/"reason"\s*:\s*"?([^"}]*)/)?.[1]?.trim() ?? "",
+    rack_x: numOf("rack_x"),
+    rack_w: numOf("rack_w"),
+  };
+}
+async function lookOnce(): Promise<Look> {
   if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing in agent/.env");
   const res = await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`rover /snap -> HTTP ${res.status}`);
@@ -483,9 +510,8 @@ async function look(): Promise<Look> {
   });
   const body = (await r.json()) as { choices?: { message?: { content?: string } }[]; error?: unknown };
   const text = body.choices?.[0]?.message?.content ?? "";
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!r.ok || !m) throw new Error(`vision check failed (HTTP ${r.status})`);
-  const j = JSON.parse(m[0]) as { view?: string; full_rack_visible?: boolean; reason?: string; rack_x?: unknown; rack_w?: unknown };
+  if (!r.ok) throw new Error(`vision check failed (HTTP ${r.status})`);
+  const j = parseLook(text);
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
   const view: View = (["OPEN_RACK_CABLES", "CLOSED_DOOR_RACK", "BLANK_PANEL", "NO_RACK"] as const).find((v) => v === j.view) ?? "NO_RACK";
   return {
