@@ -767,7 +767,7 @@ const ROUTE = {
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
   diagRightCm: Number(env("ROUTE_DIAG_RIGHT_CM", "50")), // a bit further on the photo side
   faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
-  faceRightDeg: Number(env("ROUTE_FACE_RIGHT_DEG", "105")), // a bit more so the wired side fills the photo
+  faceRightDeg: Number(env("ROUTE_FACE_RIGHT_DEG", "85")), // a bit more so the wired side fills the photo
   pauseMs: Number(env("ROUTE_PAUSE_MS", "2000")),
   aim: env("ROUTE_AIM", "off") === "on", // camera aiming with Nemotron at each stop (off = fully fixed route)
 };
@@ -783,7 +783,7 @@ async function showView(where: string, view: string, note: string, wires: boolea
 
 /** Ask Nemotron if the cabled rack is in view. If the box is partly in view, nudge toward it
  *  (small turn + a little push forward); otherwise scan left/right. All moves are recorded for the way home. */
-async function findWiresNearby(where: string): Promise<boolean> {
+async function findWiresNearby(where: string, scan = true): Promise<boolean> {
   const step = Number(env("ROUTE_SCAN_DEG", "20"));
   const pushCm = Number(env("ROUTE_PUSH_CM", "8"));
   let l = await lookAndLog(where);
@@ -796,6 +796,7 @@ async function findWiresNearby(where: string): Promise<boolean> {
     l = await lookAndLog(`${where} (nudged)`);
   }
   if (l.view === "OPEN_RACK_CABLES") return true;
+  if (!scan) return false;
   let at = 0; // scan offset in degrees: negative = left
   for (const target of [-step, -2 * step, step, 2 * step]) {
     checkAbort();
@@ -824,9 +825,36 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   }
   await sleep(500);
   log(`In position: ${(await sensors()).dist_cm} cm from the box.`);
+
+  // As soon as the wires are seen anywhere: photo, readings, home, report. Done.
+  const finish = async (where: string, found: boolean) => {
+    log(found ? `${where}: exposed wiring found. Taking the inspection photo.` : `${where}: could not get the wiring in view; taking the photo anyway.`);
+    phase("taking photo", rackId);
+    const image = await photo();
+    log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
+    phase("reading sensors", rackId);
+    for (let i = 0; i < SENSOR_SAMPLES; i++) {
+      try {
+        const s = await sensors();
+        if (s.age_s === null || s.age_s > 5) { log("Sensor board not responding; sending the photo without new readings."); break; }
+        const n = await recordReadings(db, rackId, s);
+        log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
+      } catch (e) {
+        log(`Readings skipped (${(e as Error).message}); sending the photo anyway.`);
+        break;
+      }
+      if (i < SENSOR_SAMPLES - 1) await sleep(1200);
+    }
+    await sleep(ROUTE.pauseMs);
+    checkAbort();
+    await returnHome(); // retrace everything back to the start
+    await investigate(db, rackId, image);
+  };
+
+  // front
   phase("inspecting the front", rackId);
-  await lookAndLog("front"); // real AI view on the dashboard
-  log("Checking the left side.");
+  if (await findWiresNearby("Front", false)) return finish("Front", true);
+  log("Front: no exposed wires. Checking the left side.");
   await sleep(ROUTE.pauseMs);
   const centreMark = trail.length;
 
@@ -836,10 +864,9 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("left", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
-  if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("left side", "right"); }
   phase("inspecting the left side", rackId);
-  const left = await lookAndLog("left side");
-  log(left.view === "OPEN_RACK_CABLES" ? "Left side: wiring visible here too." : "Left side: no exposed wires on this side.");
+  if (await findWiresNearby("Left side", false)) return finish("Left side", true);
+  log("Left side: no exposed wires on this side.");
   await sleep(ROUTE.pauseMs);
 
   // back to the centre the same way
@@ -848,41 +875,16 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log("Going back to the front.");
   while (trail.length > centreMark) { await undoLast(); await sleep(300); }
   await sleep(500);
-  if (ROUTE.aim) { phase("lining up with the front", rackId); await centre("front"); }
 
-  // right side
+  // right side (last stop: scan left/right too)
   checkAbort();
   phase("going to the right side", rackId);
   log("Checking the right side.");
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagRightCm)); await sleep(300);
   await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
-  if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("right side", "left"); }
-  phase("taking photo", rackId);
-  const found = await findWiresNearby("right side");
-  log(found ? "Right side: exposed wiring found. Taking the inspection photo." : "Right side: could not get the wiring in view; taking the photo anyway.");
-  const image = await photo();
-  log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
-  phase("reading sensors", rackId);
-  for (let i = 0; i < SENSOR_SAMPLES; i++) {
-    try {
-      const s = await sensors();
-      if (s.age_s === null || s.age_s > 5) {
-        log("Sensor board not responding; sending the photo without new readings.");
-        break;
-      }
-      const n = await recordReadings(db, rackId, s);
-      log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
-    } catch (e) {
-      log(`Readings skipped (${(e as Error).message}); sending the photo anyway.`);
-      break;
-    }
-    if (i < SENSOR_SAMPLES - 1) await sleep(1200);
-  }
-  await sleep(ROUTE.pauseMs);
-  checkAbort();
-  await returnHome(); // retrace everything back to the start
-  await investigate(db, rackId, image);
+  phase("inspecting the right side", rackId);
+  return finish("Right side", await findWiresNearby("Right side", true));
 }
 
 /** ROVER_MODE=sweep (default): drive around one box. ROVER_MODE=search: turn left/right to find among several boxes. */
