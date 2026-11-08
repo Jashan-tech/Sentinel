@@ -76,6 +76,12 @@ const TRIGGERS = {
   sound_min: Number(env("TRIGGER_SOUND_MIN", "250")), // sudden sound must exceed this...
   sound_factor: Number(env("TRIGGER_SOUND_FACTOR", "3")), // ...and this many times the 30 s background median
 };
+// Box sweep geometry (calibrate on the floor): speed APPROACH_SPEED moves CM_PER_SEC; a 90° turn takes TURN90_MS.
+const CM_PER_SEC = Number(env("ROVER_CM_PER_SEC", "20"));
+const TURN90_MS = Number(env("ROVER_TURN90_MS", "700"));
+const BOX_CM = Number(env("ROVER_BOX_CM", "30")); // box width/depth
+const SIDE_GAP_CM = Number(env("ROVER_SIDE_GAP_CM", "25")); // how far from a side face the rover stops to look
+const SWEEP_SIDES: ("left" | "right")[] = JSON.parse(env("ROVER_SWEEP_SIDES", '["right"]')); // left side has cables on the floor at the venue
 // Search turns (turn in place). SCAN_TURN_MS is roughly one box over; calibrate on the floor.
 const SCAN_TURN_MS = Number(env("ROVER_SCAN_TURN_MS", "400"));
 const SCAN_SCALES: number[] = JSON.parse(env("ROVER_SCAN_SCALES", "[1, 1.8]"));
@@ -546,6 +552,72 @@ async function findTarget(rackId: string): Promise<Look | null> {
   return null;
 }
 
+const cmToMs = (cm: number) => Math.round((cm / CM_PER_SEC) * 1000);
+const other = (side: "left" | "right") => (side === "left" ? "right" : "left");
+
+/** From the front of the box, drive around to face its `side` face. Returns how many moves were made. */
+async function goToSide(side: "left" | "right") {
+  const before = trail.length;
+  const lateral = BOX_CM / 2 + SIDE_GAP_CM + 10; // box half + gap + rover half
+  await back(cmToMs(15)); await sleep(250);
+  await turn(side, TURN90_MS); await sleep(250);
+  await fwd(cmToMs(lateral)); await sleep(250);
+  await turn(other(side), TURN90_MS); await sleep(250);
+  await fwd(cmToMs(APPROACH_CM + 15 + BOX_CM / 2)); await sleep(250);
+  await turn(other(side), TURN90_MS); await sleep(400);
+  return trail.length - before;
+}
+async function undoMoves(n: number) {
+  for (let i = 0; i < n; i++) { await undoLast(); await sleep(250); }
+}
+
+/** Sweep the box: front, then each side (back to the front in between). Photograph the open cabled rack when seen. */
+async function sweepInspect(db: DbConnection, rackId: string, why: string) {
+  log(`SWEEP ${rackId}: ${why}`);
+  phase("driving to rack", rackId);
+  log("Driving up to the rack (distance sensor)...");
+  await approach();
+  await sleep(600);
+  let image: ImageAttachment | null = null;
+  const take = async (where: string) => {
+    log(`Target found on the ${where}: open rack with exposed cabling. Taking the inspection photo.`);
+    phase("taking photo", rackId);
+    image = await photo();
+    log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
+    phase("reading sensors", rackId);
+    for (let i = 0; i < SENSOR_SAMPLES; i++) {
+      const s = await sensors();
+      if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
+      const n = await recordReadings(db, rackId, s);
+      log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
+      if (i < SENSOR_SAMPLES - 1) await sleep(1200);
+    }
+  };
+  let l = await lookAndLog("front");
+  if (!l.rack_visible) {
+    log("AI decision: no server rack ahead, so nothing to inspect.");
+    return;
+  }
+  if (l.view === "OPEN_RACK_CABLES") await take("front");
+  else log(`Front is ${VIEW_LABEL[l.view]}: not the target. Checking the other sides.`);
+  for (const side of SWEEP_SIDES) {
+    checkAbort();
+    phase(`driving around to the ${side} side`, rackId);
+    log(`Driving around to the ${side} side of the rack...`);
+    const n = await goToSide(side);
+    l = await lookAndLog(`${side} side`);
+    if (l.view === "OPEN_RACK_CABLES" && !image) await take(`${side} side`);
+    else if (l.view !== "OPEN_RACK_CABLES") log(`${side} side is ${VIEW_LABEL[l.view]}: no photo.`);
+    phase("back to the front", rackId);
+    log("Going back to the front.");
+    await undoMoves(n);
+    await sleep(400);
+  }
+  await returnHome();
+  if (image) await investigate(db, rackId, image);
+  else log("AI decision: no open rack with exposed cabling on any side, so no photo was taken.");
+}
+
 /** Find the open rack with exposed cabling, drive up to it, photograph it, record readings, return, run the AI.
  *  Closed-door racks, blank panels and empty views are never photographed. */
 async function smartInspect(db: DbConnection, rackId: string, why: string) {
@@ -592,6 +664,10 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
   await investigate(db, rackId, image);
 }
 
+/** ROVER_MODE=sweep (default): drive around one box. ROVER_MODE=search: turn left/right to find among several boxes. */
+const inspectRack = (db: DbConnection, rackId: string, why: string) =>
+  env("ROVER_MODE", "sweep") === "search" ? smartInspect(db, rackId, why) : sweepInspect(db, rackId, why);
+
 // drive() with opposite wheel speeds turns in place
 async function driveLR(l: number, r: number, ms: number) {
   return roverText(`/drive?l=${l}&r=${r}&ms=${ms}`, ms + 10_000);
@@ -605,7 +681,7 @@ const db = await connect();
 log(`connected to SpacetimeDB ${DATABASE} as authorized agent`, true);
 
 if (MANUAL_RACK) {
-  await run(`inspection of ${MANUAL_RACK}`, () => smartInspect(db, MANUAL_RACK, "manual dispatch"));
+  await run(`inspection of ${MANUAL_RACK}`, () => inspectRack(db, MANUAL_RACK, "manual dispatch"));
   db.disconnect();
   setTimeout(() => process.exit(0), 200).unref();
 } else if (flag("--patrol")) {
@@ -629,14 +705,14 @@ if (MANUAL_RACK) {
     }
     if (req.method === "POST" && url.pathname === "/patrol") {
       if (busy) return json(409, { error: "rover is busy" });
-      void run("inspection", () => smartInspect(db, INSPECT_RACK, "dashboard Start"));
+      void run("inspection", () => inspectRack(db, INSPECT_RACK, "dashboard Start"));
       return json(202, { started: true });
     }
     if (req.method === "POST" && url.pathname === "/inspect") {
       const rack = url.searchParams.get("rack") ?? "";
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(rack)) return json(400, { error: "bad rack" });
       if (busy) return json(409, { error: "rover is busy" });
-      void run(`inspection of ${rack}`, () => smartInspect(db, rack, "dashboard request"));
+      void run(`inspection of ${rack}`, () => inspectRack(db, rack, "dashboard request"));
       return json(202, { started: true });
     }
     if (req.method === "POST" && url.pathname === "/stop") {
@@ -667,7 +743,7 @@ if (MANUAL_RACK) {
     if (Date.now() - (lastMission.get(a.rackId) ?? 0) < COOLDOWN_MS) return;
     lastMission.set(a.rackId, Date.now());
     void run(`inspection of ${a.rackId}`, () =>
-      smartInspect(db, a.rackId, `${a.severity} ${a.metricType} alert (simulated ${reading.numericValue} ${reading.unit})`),
+      inspectRack(db, a.rackId, `${a.severity} ${a.metricType} alert (simulated ${reading.numericValue} ${reading.unit})`),
     );
   };
   db.db.rackAlert.onInsert((_ctx, a) => consider(a));
@@ -683,7 +759,7 @@ if (MANUAL_RACK) {
     log(`TRIGGER: ${reason}`);
     void run(`inspection of ${INSPECT_RACK}`, async () => {
       try {
-        await smartInspect(db, INSPECT_RACK, reason);
+        await inspectRack(db, INSPECT_RACK, reason);
       } finally {
         lastAuto = Date.now(); // cooldown counts from the end of the check
       }
