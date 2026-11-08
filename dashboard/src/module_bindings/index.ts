@@ -34,6 +34,7 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AttachInvestigationImageReducer from "./attach_investigation_image_reducer";
 import ChangeRackProfileReducer from "./change_rack_profile_reducer";
 import CompleteInvestigationReducer from "./complete_investigation_reducer";
 import IngestSimulatedObservationReducer from "./ingest_simulated_observation_reducer";
@@ -45,6 +46,7 @@ import StartInvestigationReducer from "./start_investigation_reducer";
 // Import all table schema definitions
 import CurrentTelemetryRow from "./current_telemetry_table";
 import InvestigationRow from "./investigation_table";
+import InvestigationImageRow from "./investigation_image_table";
 import RackRow from "./rack_table";
 import RackAlertRow from "./rack_alert_table";
 import RackProfileRow from "./rack_profile_table";
@@ -82,6 +84,20 @@ const tablesSchema = __schema({
       { name: 'investigation_investigation_id_key', constraint: 'unique', columns: ['investigationId'] },
     ],
   }, InvestigationRow),
+  investigationImage: __table({
+    name: 'investigation_image',
+    indexes: [
+      { accessor: 'investigationId', name: 'investigation_image_investigation_id_idx_btree', algorithm: 'btree', columns: [
+        'investigationId',
+      ] },
+      { accessor: 'rackId', name: 'investigation_image_rack_id_idx_btree', algorithm: 'btree', columns: [
+        'rackId',
+      ] },
+    ],
+    constraints: [
+      { name: 'investigation_image_investigation_id_key', constraint: 'unique', columns: ['investigationId'] },
+    ],
+  }, InvestigationImageRow),
   rack: __table({
     name: 'rack',
     indexes: [
@@ -139,6 +155,7 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("attach_investigation_image", AttachInvestigationImageReducer),
   __reducerSchema("change_rack_profile", ChangeRackProfileReducer),
   __reducerSchema("complete_investigation", CompleteInvestigationReducer),
   __reducerSchema("ingest_simulated_observation", IngestSimulatedObservationReducer),

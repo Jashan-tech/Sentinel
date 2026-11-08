@@ -31,7 +31,27 @@ scenarios.push({
 
 const args = process.argv.slice(2);
 const single = args.includes("--single");
-const filter = args.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
+// --image <file in test-assets/vision> attaches a real reference photo (with manifest provenance).
+const imageArg = args.includes("--image") ? args[args.indexOf("--image") + 1] : undefined;
+const visualOnly = args.includes("--visual-only");
+const filter = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--image").map((a) => a.toLowerCase());
+let imagePayload: any;
+if (imageArg) {
+  const manifest = JSON.parse(readFileSync(new URL("../test-assets/vision/manifest.json", import.meta.url), "utf8"));
+  const m = manifest.images.find((x: any) => x.file === imageArg);
+  if (!m) throw new Error(`${imageArg} is not in test-assets/vision/manifest.json`);
+  imagePayload = {
+    image_id: m.image_id,
+    filename: m.file,
+    mime_type: "image/jpeg",
+    data_base64: readFileSync(new URL(`../test-assets/vision/${m.file}`, import.meta.url)).toString("base64"),
+    source_type: "ONLINE_REFERENCE",
+    capture_timestamp: null,
+    source_url: m.source_page,
+    attribution: m.creator,
+    license: m.license,
+  };
+}
 const defaults = ["a-normal", "c-critical", "d-stale", "e-contradictory"];
 const selected = scenarios.filter((s) => (filter.length ? filter.some((f) => s.key.startsWith(f)) : defaults.includes(s.key)));
 
@@ -64,7 +84,11 @@ for (const s of selected) {
   const res = await fetch(`${baseUrl}/investigate${single ? "?mode=single" : ""}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(s.body),
+    body: JSON.stringify(
+      imagePayload
+        ? { ...s.body, images: [imagePayload], inspection_mode: visualOnly ? "VISUAL" : "COMBINED", ...(visualOnly ? { current_telemetry: [], recent_telemetry: [], active_alerts: [] } : {}) }
+        : s.body,
+    ),
   });
   const data: any = await res.json();
   if (!data.report) {
@@ -84,6 +108,10 @@ for (const s of selected) {
       list("hypotheses", f.hypotheses.map((h: any) => h.description), "    ");
       list("missing", f.missing_information, "    ");
     }
+    for (const img of r.evidence?.images ?? [])
+      console.log(`\n  IMAGE ${img.image_id}: ${img.filename} ${img.width}x${img.height} ${img.source_type} sha256=${img.sha256.slice(0, 16)}… license=${img.license} by ${img.attribution} capture=${img.capture_timestamp ?? "unknown"}`);
+    for (const v of r.visual_findings ?? [])
+      console.log(`    [${v.certainty}/${v.category}] ${v.observation} @ ${v.image_location}${v.potential_concern ? ` | concern: ${v.potential_concern}` : ""}${v.limitations ? ` | limits: ${v.limitations}` : ""}`);
     if (r.verification) {
       const v = r.verification;
       console.log(`\n  VERIFICATION (grounded=${v.grounded}, ${v.tools_executed.length} tool calls):`);

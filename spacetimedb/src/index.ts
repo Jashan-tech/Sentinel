@@ -10,6 +10,7 @@ import { validateObservation, evaluate, RECENT_LIMIT } from "./rules";
 import {
   validateInvestigationStart,
   validateInvestigationCompletion,
+  validateInvestigationImage,
 } from "./investigation";
 
 const observationColumns = {
@@ -100,6 +101,30 @@ const spacetimedb = schema({
       submittedBy: t.identity(),
       createdAt: t.timestamp(),
       completedAt: t.option(t.timestamp()),
+    },
+  ),
+  // Image provenance for an investigation (Feature 4). Never the full image: hash, metadata
+  // and a small preview thumbnail only. The original bytes are not retained anywhere.
+  investigationImage: table(
+    { public: true },
+    {
+      investigationId: t.string().primaryKey(),
+      rackId: t.string().index("btree"),
+      imageId: t.string(),
+      filename: t.string(),
+      mimeType: t.string(),
+      sourceType: t.string(),
+      captureTimestamp: t.option(t.timestamp()),
+      uploadedAt: t.timestamp(),
+      sourceUrl: t.string(),
+      attribution: t.string(),
+      license: t.string(),
+      sha256: t.string(),
+      byteSize: t.u32(),
+      width: t.u32(),
+      height: t.u32(),
+      thumbnailDataUrl: t.string(),
+      submittedBy: t.identity(),
     },
   ),
 });
@@ -305,6 +330,50 @@ export const completeInvestigation = spacetimedb.reducer(
       reportJson: args.reportJson,
       eventsJson: args.eventsJson,
       completedAt: ctx.timestamp,
+    });
+  },
+);
+export const attachInvestigationImage = spacetimedb.reducer(
+  {
+    investigationId: t.string(),
+    imageId: t.string(),
+    filename: t.string(),
+    mimeType: t.string(),
+    sourceType: t.string(),
+    captureTimestamp: t.option(t.timestamp()),
+    sourceUrl: t.string(),
+    attribution: t.string(),
+    license: t.string(),
+    sha256: t.string(),
+    byteSize: t.u32(),
+    width: t.u32(),
+    height: t.u32(),
+    thumbnailDataUrl: t.string(),
+  },
+  (ctx, args) => {
+    const inv = ctx.db.investigation.investigationId.find(args.investigationId);
+    if (!inv) throw new SenderError("Unknown investigation");
+    if (!inv.submittedBy.isEqual(ctx.sender))
+      throw new SenderError("Only the identity that started an investigation can attach its image");
+    if (inv.status !== "RUNNING") throw new SenderError("Images can only be attached while the investigation is running");
+    if (ctx.db.investigationImage.investigationId.find(args.investigationId))
+      throw new SenderError("This investigation already has an image");
+    if (
+      args.captureTimestamp &&
+      args.captureTimestamp.microsSinceUnixEpoch > ctx.timestamp.microsSinceUnixEpoch + 30_000_000n
+    )
+      throw new SenderError("Capture timestamp cannot be in the future");
+    try {
+      validateInvestigationImage(args);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    ctx.db.investigationImage.insert({
+      ...args,
+      captureTimestamp: args.captureTimestamp ?? undefined, // unknown stays unknown
+      rackId: inv.rackId,
+      uploadedAt: ctx.timestamp, // server time, not client-supplied
+      submittedBy: ctx.sender,
     });
   },
 );

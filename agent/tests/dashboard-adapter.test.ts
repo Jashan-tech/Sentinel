@@ -2,7 +2,9 @@
 // the agent accepts, without inventing readings.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildInvestigationRequest, validateInvestigationResponse, toIso } from "../../dashboard/src/investigation.js";
+import { buildInvestigationRequest, validateInvestigationResponse, toIso, snapshotForStorage, sniffImageType } from "../../dashboard/src/investigation.js";
+import { readFileSync } from "node:fs";
+import { acceptImage } from "../src/images.js";
 import { InvestigationRequest } from "../src/schemas.js";
 
 const us = (iso: string) => ({ microsSinceUnixEpoch: BigInt(Date.parse(iso)) * 1000n });
@@ -53,4 +55,25 @@ test("response validation rejects wrong rack, single-agent reports and bad statu
   assert.throws(() => validateInvestigationResponse({ report, events: [] }, "rack-2"), /not rack-2/);
   assert.throws(() => validateInvestigationResponse({ report: { ...report, agents_invoked: undefined }, events: [] }, "rack-1"), /multi-agent/);
   assert.throws(() => validateInvestigationResponse({ report: { ...report, investigation_status: "DONE" }, events: [] }, "rack-1"), /status/);
+});
+
+test("image request: passes the agent schema and byte validation; VISUAL mode sends no telemetry; storage has no bytes", () => {
+  const bytes = readFileSync(new URL("../test-assets/vision/switch-5port-led-closeup.jpg", import.meta.url));
+  assert.equal(sniffImageType(bytes), "image/jpeg");
+  const image = {
+    imageId: "img-1", filename: "switch.jpg", mimeType: "image/jpeg" as const, base64: bytes.toString("base64"),
+    sha256: "x".repeat(64), byteSize: bytes.length, width: 1920, height: 1272, thumbnailDataUrl: "",
+    sourceType: "ONLINE_REFERENCE" as const, captureTimestamp: null, sourceUrl: "https://commons.wikimedia.org/wiki/File:X.jpg", attribution: "A", license: "CC0",
+  };
+  const combined = InvestigationRequest.parse(buildInvestigationRequest(base, { mode: "COMBINED", image }));
+  assert.equal(combined.inspection_mode, "COMBINED");
+  assert.equal(combined.current_telemetry.length, 1);
+  assert.equal(acceptImage(combined.images[0]).provenance.image_id, "img-1");
+  assert.equal(acceptImage(combined.images[0]).provenance.capture_timestamp, null);
+  const visual = InvestigationRequest.parse(buildInvestigationRequest(base, { mode: "VISUAL", image }));
+  assert.deepEqual([visual.current_telemetry, visual.recent_telemetry, visual.active_alerts], [[], [], []]);
+  const stored = JSON.stringify(snapshotForStorage(buildInvestigationRequest(base, { mode: "COMBINED", image }), image));
+  assert.ok(!stored.includes("data_base64") && !stored.includes(image.base64.slice(0, 100)));
+  assert.match(stored, /"sha256":"x{64}"/);
+  assert.equal("images" in buildInvestigationRequest(base), false, "telemetry-only requests unchanged");
 });

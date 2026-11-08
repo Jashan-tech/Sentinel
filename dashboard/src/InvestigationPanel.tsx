@@ -1,8 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Timestamp } from "spacetimedb";
 import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { DbConnection, tables } from "./module_bindings";
-import type { Rack, RackProfile, CurrentTelemetry, RecentObservation, RackAlert, Investigation } from "./module_bindings/types";
-import { buildInvestigationRequest, validateInvestigationResponse, type AgentEvent, type AgentReport } from "./investigation";
+import type { Rack, RackProfile, CurrentTelemetry, RecentObservation, RackAlert, Investigation, InvestigationImage } from "./module_bindings/types";
+import {
+  buildInvestigationRequest,
+  snapshotForStorage,
+  validateInvestigationResponse,
+  type AgentEvent,
+  type AgentReport,
+  type ImageAttachment,
+  type ImageSourceType,
+  type InspectionMode,
+} from "./investigation";
+import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
 
 const AGENT_URL = "/api/agent/investigate"; // Vite proxy -> agent service (port 3001); no API key in the browser
@@ -18,6 +29,11 @@ function parse<T>(json: string, fallback: T): T {
 }
 
 const micros = (r: Investigation) => r.createdAt.microsSinceUnixEpoch;
+const SOURCE_LABEL: Record<string, string> = {
+  MANUAL_UPLOAD: "Manual upload",
+  ONLINE_REFERENCE: "Online reference — not captured by SENTINEL",
+  ROVER_CAMERA: "Rover camera",
+};
 
 export default function InvestigationPanel(props: {
   rack: Rack;
@@ -34,6 +50,42 @@ export default function InvestigationPanel(props: {
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [imageRows] = useTable(tables.investigationImage.where((r) => r.rackId.eq(rack.rackId)));
+  // Image to inspect (local only until a run; bytes are sent to the agent, never stored).
+  const [image, setImage] = useState<ImageAttachment | null>(null);
+  const [preview, setPreview] = useState("");
+  const [imageError, setImageError] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [sourceType, setSourceType] = useState<ImageSourceType>("MANUAL_UPLOAD");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [attribution, setAttribution] = useState("");
+  const [license, setLicense] = useState("");
+  const [captureTime, setCaptureTime] = useState("");
+  const [includeTelemetry, setIncludeTelemetry] = useState(true);
+  const [fileKey, setFileKey] = useState(0);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  async function selectFile(file: File | undefined) {
+    setImageError("");
+    clearImage(false);
+    if (!file) return;
+    setPreparing(true);
+    try {
+      const prepared = await prepareImage(file, { sourceType, sourceUrl, attribution, license, captureTime });
+      setImage(prepared);
+      setPreview(URL.createObjectURL(file));
+    } catch (e) {
+      setImageError((e as Error).message);
+      setFileKey((k) => k + 1);
+    } finally {
+      setPreparing(false);
+    }
+  }
+  function clearImage(resetInput = true) {
+    setImage(null);
+    setPreview("");
+    if (resetInput) setFileKey((k) => k + 1);
+  }
 
   const sorted = useMemo(() => [...rows].sort((a, b) => (micros(b) > micros(a) ? 1 : micros(b) < micros(a) ? -1 : 0)), [rows]);
   const shown = sorted.find((r) => r.investigationId === selectedId) ?? sorted[0];
@@ -41,7 +93,7 @@ export default function InvestigationPanel(props: {
     (r) => r.status === "RUNNING" && Date.now() - Number(micros(r) / 1000n) < ABANDONED_AFTER_MS,
   );
 
-  async function run() {
+  async function run(mode: InspectionMode = "TELEMETRY", img?: ImageAttachment) {
     if (busy || runningElsewhere) return; // duplicate-request guard (local + any session)
     const db = state.getConnection() as DbConnection | null;
     if (!db || !ready || !rowsReady || !profile) {
@@ -51,18 +103,44 @@ export default function InvestigationPanel(props: {
     setBusy(true);
     setLocalError("");
     // One logical snapshot of the subscribed rows for this rack, captured at click time.
-    const request = buildInvestigationRequest({
-      rack,
-      profile,
-      current: props.current,
-      recent: props.history,
-      alerts: props.alerts,
-      asOf: new Date(),
-      staleAfterSeconds: props.freshnessSeconds,
-    });
+    // Provenance as entered at run time (fields may change after the file was chosen).
+    const attached = img && { ...img, sourceType, sourceUrl: sourceUrl.trim(), attribution: attribution.trim(), license: license.trim(), captureTimestamp: captureTime ? new Date(captureTime).toISOString() : null };
+    const request = buildInvestigationRequest(
+      {
+        rack,
+        profile,
+        current: props.current,
+        recent: props.history,
+        alerts: props.alerts,
+        asOf: new Date(),
+        staleAfterSeconds: props.freshnessSeconds,
+      },
+      mode === "TELEMETRY" ? {} : { mode, image: attached },
+    );
     const investigationId = crypto.randomUUID();
     try {
-      await db.reducers.startInvestigation({ investigationId, rackId: rack.rackId, snapshotJson: JSON.stringify(request) });
+      await db.reducers.startInvestigation({
+        investigationId,
+        rackId: rack.rackId,
+        snapshotJson: JSON.stringify(snapshotForStorage(request, attached)),
+      });
+      if (attached)
+        await db.reducers.attachInvestigationImage({
+          investigationId,
+          imageId: attached.imageId,
+          filename: attached.filename,
+          mimeType: attached.mimeType,
+          sourceType: attached.sourceType,
+          captureTimestamp: attached.captureTimestamp ? new Timestamp(BigInt(Date.parse(attached.captureTimestamp)) * 1000n) : undefined,
+          sourceUrl: attached.sourceUrl,
+          attribution: attached.attribution,
+          license: attached.license,
+          sha256: attached.sha256,
+          byteSize: attached.byteSize,
+          width: attached.width,
+          height: attached.height,
+          thumbnailDataUrl: attached.thumbnailDataUrl,
+        });
     } catch (e) {
       setLocalError(`Could not record the investigation in SpacetimeDB: ${(e as Error).message}`);
       setBusy(false);
@@ -83,7 +161,7 @@ export default function InvestigationPanel(props: {
       });
       const body = await res.json().catch(() => null);
       if (!body?.report) throw new Error(body?.message ?? body?.error ?? `Agent service returned HTTP ${res.status}`);
-      const { report, events } = validateInvestigationResponse(body, rack.rackId);
+      const { report, events } = validateInvestigationResponse(body, rack.rackId, Boolean(attached));
       status = report.investigation_status;
       severity = report.severity;
       reportJson = JSON.stringify(report);
@@ -107,6 +185,7 @@ export default function InvestigationPanel(props: {
     setBusy(false);
   }
 
+  const shownImage = shown ? imageRows.find((r) => r.investigationId === shown.investigationId) : undefined;
   const report = shown && shown.status !== "RUNNING" ? parse<Partial<AgentReport> & { error?: string }>(shown.reportJson, {}) : null;
   const events = shown ? parse<AgentEvent[]>(shown.eventsJson, []) : [];
   const abandoned = shown?.status === "RUNNING" && Date.now() - Number(micros(shown) / 1000n) >= ABANDONED_AFTER_MS;
@@ -120,16 +199,69 @@ export default function InvestigationPanel(props: {
         </div>
         <button
           className="investigate-button"
-          onClick={() => void run()}
+          onClick={() => void run("TELEMETRY")}
           disabled={!ready || !rowsReady || busy || runningElsewhere}
         >
           {busy || runningElsewhere ? "Investigation running…" : "Run AI Investigation"}
         </button>
       </div>
       <p className="muted">
-        Runs only when requested. A Supervisor agent delegates to Telemetry, Environment, Documentation and Verification
-        agents using this rack's subscribed data. AI output is hypotheses, not confirmed faults.
+        Runs only when requested. A Supervisor agent delegates to Telemetry, Environment, Documentation, Vision and
+        Verification agents using this rack's subscribed data. AI output is hypotheses, not confirmed faults.
       </p>
+      <div className="vision-upload" data-testid="vision-upload">
+        <div className="vision-controls">
+          <label>
+            Inspection photo <small>JPEG or PNG · max 4 MB · max 4096 px</small>
+            <input key={fileKey} type="file" accept="image/jpeg,image/png" aria-label="Inspection photo" disabled={busy || preparing} onChange={(e) => void selectFile(e.target.files?.[0])} />
+          </label>
+          <label>
+            Image source
+            <select aria-label="Image source" value={sourceType} onChange={(e) => setSourceType(e.target.value as ImageSourceType)}>
+              <option value="MANUAL_UPLOAD">Manual upload</option>
+              <option value="ONLINE_REFERENCE">Online reference image</option>
+              <option value="ROVER_CAMERA" disabled>Rover camera (not yet connected)</option>
+            </select>
+          </label>
+          {sourceType === "ONLINE_REFERENCE" && (
+            <>
+              <label>Source page URL<input aria-label="Source page URL" value={sourceUrl} maxLength={500} placeholder="https://…" onChange={(e) => setSourceUrl(e.target.value)} /></label>
+              <label>Attribution<input aria-label="Attribution" value={attribution} maxLength={300} onChange={(e) => setAttribution(e.target.value)} /></label>
+              <label>License<input aria-label="License" value={license} maxLength={100} onChange={(e) => setLicense(e.target.value)} /></label>
+            </>
+          )}
+          <label>
+            Capture time <small>(blank = unknown)</small>
+            <input aria-label="Capture time" type="datetime-local" step="1" value={captureTime} onChange={(e) => setCaptureTime(e.target.value)} />
+          </label>
+          <label className="vision-check">
+            <input type="checkbox" aria-label="Include current rack telemetry" checked={includeTelemetry} onChange={(e) => setIncludeTelemetry(e.target.checked)} />
+            Include current rack telemetry
+          </label>
+        </div>
+        {preparing && <p className="inv-running">Validating image…</p>}
+        {imageError && <div className="error" role="alert">{imageError}</div>}
+        {image && (
+          <div className="vision-preview">
+            <img src={preview} alt={`Selected inspection photo ${image.filename}`} />
+            <div className="inv-meta">
+              <b>{image.filename}</b> · {image.width}×{image.height} · {(image.byteSize / 1024).toFixed(0)} KB · {SOURCE_LABEL[sourceType]}
+              <br />sha256 {image.sha256.slice(0, 16)}…
+              <div className="vision-actions">
+                <button type="button" onClick={() => clearImage()} disabled={busy}>Remove image</button>
+                <button
+                  type="button"
+                  className="investigate-button"
+                  onClick={() => void run(includeTelemetry ? "COMBINED" : "VISUAL", image)}
+                  disabled={!ready || !rowsReady || busy || runningElsewhere}
+                >
+                  {busy || runningElsewhere ? "Investigation running…" : "Run Visual Inspection"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
       {localError && (
         <div className="error" role="alert">
           {localError}
@@ -157,7 +289,8 @@ export default function InvestigationPanel(props: {
           <div className="inv-status-row">
             <span className={`inv-badge status-${shown.status.toLowerCase()}`}>{abandoned ? "ABANDONED" : shown.status}</span>
             {shown.status !== "RUNNING" && <span className={`inv-badge sev-${shown.severity.toLowerCase()}`}>{shown.severity}</span>}
-            {shown.telemetrySimulated && <span className="sim-label">SIMULATED TELEMETRY</span>}
+            {shown.telemetrySimulated && report?.inspection_mode !== "VISUAL" && <span className="sim-label">SIMULATED TELEMETRY</span>}
+            {report?.inspection_mode && report.inspection_mode !== "TELEMETRY" && <span className="inv-badge">{report.inspection_mode}</span>}
             <span className="inv-meta">
               Profile at run: {shown.profileName} · Started {date(shown.createdAt)}
               {shown.completedAt ? ` · Finished ${date(shown.completedAt)}` : ""}
@@ -176,8 +309,27 @@ export default function InvestigationPanel(props: {
             </p>
           )}
 
+          {shownImage && <ImageProvenanceView img={shownImage} />}
           {report && report.summary && shown.status !== "FAILED" && (
             <>
+              {!!report.visual_findings?.length && (
+                <>
+                  <h3 className="inv-h">Visual observations <small>Vision Agent · AI-described, not confirmed faults</small></h3>
+                  <ul className="inv-list visual" data-testid="visual-findings">
+                    {report.visual_findings.map((v, i) => (
+                      <li key={i}>
+                        <span className={`inv-badge ${v.certainty === "CERTAIN" ? "status-completed" : "status-incomplete"}`}>{v.certainty}</span>{" "}
+                        <code>{v.category}</code> {v.observation}
+                        {v.image_location && <small> · {v.image_location}</small>}
+                        {v.visual_evidence && <div className="ev">Evidence: {v.visual_evidence}</div>}
+                        {v.potential_concern && <div className="ev missing">Possible concern: {v.potential_concern}</div>}
+                        {v.limitations && <div className="ev">Limitations: {v.limitations}</div>}
+                        {v.recommended_follow_up && <div className="ev plus">Follow-up: {v.recommended_follow_up}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <h3 className="inv-h">Final diagnosis <small>AI-written summary</small></h3>
               <p className="inv-summary">{report.summary}</p>
 
@@ -287,5 +439,21 @@ export default function InvestigationPanel(props: {
         consistency by SpacetimeDB; they are not cryptographically attested as agent output.
       </div>
     </section>
+  );
+}
+
+function ImageProvenanceView({ img }: { img: InvestigationImage }) {
+  return (
+    <div className="vision-preview stored" data-testid="image-provenance">
+      {img.thumbnailDataUrl ? <img src={img.thumbnailDataUrl} alt={`Preview of ${img.filename}`} /> : <div className="no-thumb">No preview</div>}
+      <div className="inv-meta">
+        <b>{img.filename}</b> · {img.width}×{img.height} · {(img.byteSize / 1024).toFixed(0)} KB · <span className="sim-label">{SOURCE_LABEL[img.sourceType] ?? img.sourceType}</span>
+        <br />Image ID {img.imageId} · sha256 {img.sha256.slice(0, 16)}…
+        <br />Captured: {img.captureTimestamp ? date(img.captureTimestamp) : "unknown"} · Uploaded: {date(img.uploadedAt)}
+        {img.sourceUrl && (<><br />Source: <a href={img.sourceUrl} target="_blank" rel="noreferrer noopener">{img.sourceUrl}</a></>)}
+        {(img.attribution || img.license) && (<><br />{img.attribution}{img.attribution && img.license ? " · " : ""}{img.license}</>)}
+        <br /><small>Only this preview and the image's metadata are stored; the full image is not retained.</small>
+      </div>
+    </div>
   );
 }
