@@ -78,7 +78,7 @@ const TRIGGERS = {
 };
 // Box sweep geometry (calibrate on the floor): speed APPROACH_SPEED moves CM_PER_SEC; a 90° turn takes TURN90_MS.
 const CM_PER_SEC = Number(env("ROVER_CM_PER_SEC", "20.7")); // measured on the floor at speed 30
-const TURN90_MS = Number(env("ROVER_TURN90_MS", "470")); // 0.7 s turned ~120° on carpet -> 0.525 s for 90°
+const TURN90_MS = Number(env("ROVER_TURN90_MS", "400")); // 0.7 s turned ~120° on carpet -> 0.525 s for 90°
 const BOX_CM = Number(env("ROVER_BOX_CM", "30")); // box width/depth
 const SIDE_GAP_CM = Number(env("ROVER_SIDE_GAP_CM", "25")); // how far from a side face the rover stops to look
 const SWEEP_SIDES: ("left" | "right")[] = JSON.parse(env("ROVER_SWEEP_SIDES", '["left", "right"]'));
