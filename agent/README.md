@@ -40,6 +40,7 @@ npm run probe -- nvidia/<model-id>   # check a model's tool calling on your key
 | `MAX_SPECIALIST_TOOL_ROUNDS` | `3` (hard cap 3) | Tool rounds per agent run |
 | `MAX_VERIFICATION_RETRIES` | `1` | Verification can run at most 1 + this many times |
 | `MAX_INVESTIGATION_SECONDS` | `90` | Wall-clock budget. 15 s of it is kept back for the final synthesis |
+| `MAX_VISUAL_INVESTIGATION_SECONDS` | `130` | Budget when a photo is attached. A further 20 s is reserved so the mandatory verification can run after Vision |
 | `MAX_INVESTIGATION_ROUNDS` | `5` | Tool rounds for the single-agent engine only (`?mode=single`) |
 | `MAX_OUTPUT_TOKENS` | `2048` | Output cap for each model call |
 | `NVIDIA_ENABLE_THINKING` | `false` | Sets `chat_template_kwargs.enable_thinking`. Reasoning text is never returned |

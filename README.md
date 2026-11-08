@@ -106,7 +106,7 @@ All five agents run on **NVIDIA Nemotron 3.5 Super** (`nvidia/nemotron-3.5-super
 **The investigation adapts to the rack.** A normal rack usually gets one Telemetry check. A critical or contradictory rack gets three or four specialists, ending with Verification. Vision is offered to the Supervisor only when a photo is attached. The sequence is the Supervisor's own decision, not a fixed script.
 
 **Built-in safeguards**
-- Limits: at most 5 agent runs, 3 tool rounds per agent, 1 verification retry, and 90 s in total. Hitting any of them marks the report `INCOMPLETE`.
+- Limits: at most 5 agent runs, 3 tool rounds per agent, 1 verification retry, and 90 s in total (130 s when a photo is attached). Hitting any of them marks the report `INCOMPLETE`.
 - The Supervisor can't finish before any agent has examined the data. A non-normal rack, or any investigation with a photo, must go through verification, and the last delegation is reserved for it. An attached photo can't be skipped. An identical task is never repeated. Each time one of these rules steps in, it appears as a visible `GUARD` event in the timeline.
 - Severity follows the profile thresholds applied to fresh readings.
 - Malformed model output gets one repair attempt. An outright failure is marked `FAILED` and is never shown as a diagnosis.
@@ -197,7 +197,7 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 |---|---|---|
 | `agent/.env` | `NVIDIA_API_KEY` | required |
 | `agent/.env` | `NVIDIA_MODEL`, `NVIDIA_SPECIALIST_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` |
-| `agent/.env` | `MAX_DELEGATIONS`, `MAX_SPECIALIST_TOOL_ROUNDS`, `MAX_VERIFICATION_RETRIES`, `MAX_INVESTIGATION_SECONDS` | 5, 3, 1, 90 |
+| `agent/.env` | `MAX_DELEGATIONS`, `MAX_SPECIALIST_TOOL_ROUNDS`, `MAX_VERIFICATION_RETRIES`, `MAX_INVESTIGATION_SECONDS`, `MAX_VISUAL_INVESTIGATION_SECONDS` | 5, 3, 1, 90, 130 |
 | `dashboard/.env.local` | `VITE_SPACETIME_URI`, `VITE_SPACETIME_DATABASE` | `ws://127.0.0.1:3000`, `sentinel` |
 | environment | `AGENT_URL` (target of the Vite proxy) | `http://127.0.0.1:3001` |
 | environment | `SPACETIME_CLI` (CLI path, if not on PATH) | `spacetime` |

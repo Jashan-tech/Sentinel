@@ -13,7 +13,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 25,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T10:50:00.000Z",

@@ -184,7 +184,7 @@ try {
       sourceIdentifier: source,
       observedAt: new Timestamp(BigInt(now + offset) * 1000n),
     });
-  browser = await chromium.launch({ channel: "msedge", headless: true });
+  browser = await chromium.launch({ channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge", headless: true });
   const [ca, cb] = await Promise.all([
     browser.newContext({ viewport: { width: 1440, height: 1100 } }),
     browser.newContext(),

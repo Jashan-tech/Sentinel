@@ -89,7 +89,9 @@ export function createApp(deps: AppDeps = {}) {
             maxDelegations: config.maxDelegations,
             maxSpecialistToolRounds: config.maxSpecialistToolRounds,
             maxVerificationRetries: config.maxVerificationRetries,
-            maxInvestigationSeconds: config.maxInvestigationSeconds,
+            maxInvestigationSeconds: images.length
+              ? Math.max(config.maxInvestigationSeconds, config.maxVisualInvestigationSeconds ?? 0)
+              : config.maxInvestigationSeconds,
             images,
             visionModel: visionModel ?? specialistModel ?? model,
             visionModelName: config.visionModel,

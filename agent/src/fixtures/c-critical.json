@@ -14,7 +14,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 35.4,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:59:00.000Z",
@@ -24,7 +24,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 38,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:59:00.000Z",
@@ -56,7 +56,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 28.2,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:20:00.000Z",
@@ -66,7 +66,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 29.5,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:25:00.000Z",
@@ -76,7 +76,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 30.9,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:30:00.000Z",
@@ -86,7 +86,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 32.1,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:35:00.000Z",
@@ -96,7 +96,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 33.4,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:40:00.000Z",
@@ -106,7 +106,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 34.3,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:45:00.000Z",
@@ -116,7 +116,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 35,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:50:00.000Z",
@@ -126,7 +126,7 @@
     {
       "metric_type": "AMBIENT_TEMPERATURE_C",
       "numeric_value": 35.4,
-      "unit": "C",
+      "unit": "°C",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-temp-01",
       "observed_at": "2026-11-07T13:55:00.000Z",
@@ -196,7 +196,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 41,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:30:00.000Z",
@@ -206,7 +206,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 40,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:36:00.000Z",
@@ -216,7 +216,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 39,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:42:00.000Z",
@@ -226,7 +226,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 39,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:48:00.000Z",
@@ -236,7 +236,7 @@
     {
       "metric_type": "RELATIVE_HUMIDITY_PERCENT",
       "numeric_value": 38,
-      "unit": "%",
+      "unit": "%RH",
       "source_type": "SIMULATOR",
       "source_identifier": "sim-hum-01",
       "observed_at": "2026-11-07T13:54:00.000Z",

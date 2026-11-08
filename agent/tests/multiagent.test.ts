@@ -150,7 +150,8 @@ test("invalid agent outputs: bad supervisor JSON is repaired; bad specialist JSO
   );
   assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry"]);
   assert.equal(report.specialist_findings[0].status, "INCOMPLETE");
-  assert.equal(report.investigation_status, "COMPLETED");
+  // Fixed (issue 3): an INCOMPLETE specialist can no longer produce a COMPLETED report.
+  assert.equal(report.investigation_status, "INCOMPLETE");
 
   const r2 = await run(req, [new AIMessage("??"), new AIMessage("??"), synthesis("NORMAL")], []);
   assert.deepEqual(r2.report.limits_reached, ["SUPERVISOR_OUTPUT_INVALID"]);

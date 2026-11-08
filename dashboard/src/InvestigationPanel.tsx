@@ -20,13 +20,14 @@ import {
   type ImageAttachment,
   type ImageSourceType,
   type InspectionMode,
+  VERIFICATION_LABEL,
 } from "./investigation";
 import EquipmentEvidence from "./EquipmentEvidence";
 import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
 
 const AGENT_URL = "/api/agent/investigate"; // Vite proxy -> agent service (port 3001); no API key in the browser
-const CLIENT_TIMEOUT_MS = 150_000; // agent budget is 90 s plus synthesis
+const CLIENT_TIMEOUT_MS = 180_000; // agent budget: 90 s (130 s with a photo) plus synthesis
 const ABANDONED_AFTER_MS = 5 * 60_000; // RUNNING rows older than this no longer block new runs
 
 function parse<T>(json: string, fallback: T): T {
@@ -543,6 +544,15 @@ export default function InvestigationPanel(props: {
               report.inspection_mode !== "TELEMETRY" && (
                 <span className="inv-badge">{report.inspection_mode}</span>
               )}
+            {report?.verification_outcome && (
+              <span
+                className={`inv-badge ${report.verification_outcome === "VERIFIED" ? "status-completed" : report.verification_outcome === "NOT_REQUIRED" ? "" : "status-incomplete"}`}
+                data-testid="verification-outcome"
+                data-outcome={report.verification_outcome}
+              >
+                {VERIFICATION_LABEL[report.verification_outcome]}
+              </span>
+            )}
             <span className="inv-meta">
               Profile at run: {shown.profileName} · Started{" "}
               {date(shown.createdAt)}
@@ -571,13 +581,20 @@ export default function InvestigationPanel(props: {
             </p>
           )}
           {shown.status === "INCOMPLETE" && (
-            <p className="inv-warning">
+            <div className="inv-warning">
               Incomplete investigation
-              {report?.limits_reached?.length
+              {!report?.incomplete_reasons?.length && report?.limits_reached?.length
                 ? ` (limits reached: ${report.limits_reached.join(", ")})`
                 : ""}
               . Treat the diagnosis as partial.
-            </p>
+              {!!report?.incomplete_reasons?.length && (
+                <ul className="inv-list" data-testid="incomplete-reasons">
+                  {report.incomplete_reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           {shownImage && <ImageProvenanceView img={shownImage} />}
@@ -709,11 +726,13 @@ export default function InvestigationPanel(props: {
                   <h3 className="inv-h">
                     Verification{" "}
                     <small>
-                      {report.verification
-                        ? report.verification.grounded
-                          ? "findings grounded"
-                          : "grounding problems found"
-                        : "not run"}
+                      {report.verification_outcome
+                        ? VERIFICATION_LABEL[report.verification_outcome]
+                        : report.verification
+                          ? report.verification.grounded
+                            ? "findings grounded"
+                            : "grounding problems found"
+                          : "not run"}
                     </small>
                   </h3>
                   <ul className="inv-list">
