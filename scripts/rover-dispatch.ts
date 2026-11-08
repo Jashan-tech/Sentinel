@@ -767,6 +767,7 @@ const ROUTE = {
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
   faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
   pauseMs: Number(env("ROUTE_PAUSE_MS", "2000")),
+  aim: env("ROUTE_AIM", "off") === "on", // camera aiming with Nemotron at each stop (off = fully fixed route)
 };
 const degMs = (deg: number) => Math.round((deg / 90) * TURN90_MS);
 
@@ -807,8 +808,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("left", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
-  phase("aiming at the box", rackId);
-  await centre("left side", "right"); // turn in small steps until the box is centred
+  if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("left side", "right"); }
   phase("inspecting the left side", rackId);
   await showView("left side", "left side of the rack", "Left side: no exposed wires on this side.", false);
   log("Left side: no exposed wires on this side.");
@@ -820,8 +820,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log("Going back to the front.");
   while (trail.length > centreMark) { await undoLast(); await sleep(300); }
   await sleep(500);
-  phase("lining up with the front", rackId);
-  await centre("front"); // fix any drift so the right side starts straight
+  if (ROUTE.aim) { phase("lining up with the front", rackId); await centre("front"); }
 
   // right side
   checkAbort();
@@ -830,9 +829,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
   await turn("left", degMs(ROUTE.faceDeg)); await sleep(500);
-  phase("aiming at the box", rackId);
-  const aim = await centre("right side", "left"); // centre the box before the photo
-  if (!aim.rack_visible) log("Warning: the box is not clearly in view; taking the photo anyway.");
+  if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("right side", "left"); }
   phase("taking photo", rackId);
   await showView("right side", "open rack with exposed cabling (TARGET)", "Right side: exposed wiring found. Taking the inspection photo.", true);
   log("Right side: exposed wiring found. Taking the inspection photo.");
