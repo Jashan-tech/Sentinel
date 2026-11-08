@@ -14,7 +14,13 @@ import {
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { z } from "zod";
 import type { AcceptedImage } from "./images.js";
-import { errMsg, extractJson, summarizeResult, textOf, type InvestigatorModel } from "./graph.js";
+import {
+  errMsg,
+  extractJson,
+  summarizeResult,
+  textOf,
+  type InvestigatorModel,
+} from "./graph.js";
 import {
   createDocumentationTool,
   createTools,
@@ -61,7 +67,9 @@ export interface MultiAgentResult {
 }
 
 /** OpenAI-style content part (text or image_url data URL), as accepted by NVIDIA's endpoint. */
-type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 /** Time kept in reserve for the final synthesis call. */
 const FINAL_RESERVE_MS = 15_000;
@@ -75,7 +83,10 @@ const SENSOR_RULES = `Facts about the data:
 - SOUND_RAW is uncalibrated raw intensity (not decibels); alone it cannot identify a mechanical fault.
 - ULTRASONIC_DISTANCE_CM alone does not prove an obstruction; ambient temperature alone does not prove a failed fan.
 - Rack profile thresholds are fictional demo settings, not manufacturer specifications.
-- Stale readings are not current evidence. Missing metrics are unknown, never "normal".`;
+- Stale readings are not current evidence. Missing metrics are unknown, never "normal".
+- Use deterministic tools for numerical trends; preserve sampled windows, simulated provenance, source separation and data quality. No failure probabilities, useful-life estimates or failure dates.
+- Distinguish observed threshold conditions, early-warning trends, possible explanations, and verified equipment faults. This system can establish the first two; neither a photo nor a trend proves a fault.
+- Equipment identity requires explicit operator metadata for the selected rack. Branding in an online reference image never establishes that identity. Manufacturer guidance is conditional; rover ambient temperature is not equipment inlet temperature.`;
 
 const FINDINGS_FORMAT = `When you are done, reply with ONLY this JSON object (no markdown, no prose):
 {"observations": string[], "hypotheses": [{"description": string, "supporting_evidence": string[], "contradicting_evidence": string[], "missing_evidence": string[]}], "missing_information": string[], "recommended_next_action": string}
@@ -88,7 +99,7 @@ const AGENT_PROMPTS: Record<AgentName, string> = {
   telemetry: `You are the TELEMETRY AGENT of SENTINEL, a data center investigation team.
 Your job: analyze current readings and history for one rack. Compare readings against the rack profile's warning and
 critical thresholds, compare readings across time, detect trends and sudden changes, and list missing or stale observations.
-Use your tools (get_current_telemetry, get_telemetry_history, get_rack_profile) to get the data.
+Use get_current_telemetry and get_rack_profile for current conditions. For every historical numerical claim, call analyze_telemetry_trends for that metric and get_early_warning_indicators. Never calculate numerical trends yourself; quote the returned source, window, data quality and direction. Two-point changes are not sustained trends. get_telemetry_history retrieves supporting samples.
 Start with get_current_telemetry WITHOUT metric_type so you see every available reading and which metrics are missing;
 report missing metrics explicitly. Then call only what your objective needs.
 ${SENSOR_RULES}
@@ -107,7 +118,7 @@ ${FINDINGS_FORMAT}`,
 Your job: retrieve the reference documentation available for this rack's equipment type with lookup_equipment_documentation,
 and the configured rack profile with get_rack_profile. Report which operating limits are documented and by what source.
 Clearly distinguish (a) manufacturer specifications, (b) project documentation, (c) fictional demo thresholds.
-If a manufacturer specification is unavailable, say so explicitly. Cite the doc_id for every documentation claim.
+If lookup returns NO_MATCH, model-specific guidance is unavailable. Generic rack equipment_type and online reference image branding NEVER identify installed equipment. Only the explicit operator-provided identity in get_rack_profile can select manufacturer records. Cite doc_id, section and source_url for each fact, and preserve applicability and limitations.
 Never invent manuals, specifications, model numbers or citations.
 ${SENSOR_RULES}
 ${FINDINGS_FORMAT}`,
@@ -134,7 +145,7 @@ Give 3-10 visual_findings. Be concise.`,
 
   verification: `You are the VERIFICATION AGENT of SENTINEL, an independent reviewer.
 You receive findings written by other agents. Do NOT restate them; judge them.
-- Spot-check the key factual claims against the data yourself with get_current_telemetry / get_telemetry_history.
+- Spot-check factual claims with current telemetry/history; verify every trend using analyze_telemetry_trends and indicators. Verify manufacturer citations and applicability with lookup_equipment_documentation and get_rack_profile. Reject numerical calculations or model identities not returned by these tools.
 - Flag claims not supported by tool data, root-cause claims stated as fact, and contradictions between agents or with the data.
 - List evidence that is missing for the conclusions drawn.
 - Only list a claim in verified_findings if the tool data supports it.
@@ -149,17 +160,25 @@ When done, reply with ONLY this JSON object:
 {"grounded": boolean, "verified_findings": string[], "unsupported_claims": string[], "contradictions": string[], "missing_evidence": string[], "request_more_investigation": boolean, "follow_up_agent": "telemetry"|"environment"|"documentation"|"vision"|null, "follow_up_objective": string|null}`,
 };
 
-const supervisorPrompt = (hasImages: boolean) => SUPERVISOR_PROMPT.replace(
-  "- verification:",
-  hasImages
-    ? "- vision: inspects the supplied photograph (equipment, ports, cables, labels, LEDs, irregularities); no tools\n- verification:"
-    : "- verification:",
-).replace(
-  "- Finish when",
-  hasImages
-    ? "- A photograph was supplied by the operator: delegate it to vision. Combine with telemetry when readings or alerts make it relevant.\n- Finish when"
-    : "- Finish when",
-).replace('"next": "telemetry"|"environment"|"documentation"|"verification"|"finish"', hasImages ? '"next": "telemetry"|"environment"|"documentation"|"vision"|"verification"|"finish"' : '"next": "telemetry"|"environment"|"documentation"|"verification"|"finish"');
+const supervisorPrompt = (hasImages: boolean) =>
+  SUPERVISOR_PROMPT.replace(
+    "- verification:",
+    hasImages
+      ? "- vision: inspects the supplied photograph (equipment, ports, cables, labels, LEDs, irregularities); no tools\n- verification:"
+      : "- verification:",
+  )
+    .replace(
+      "- Finish when",
+      hasImages
+        ? "- A photograph was supplied by the operator: delegate it to vision. Combine with telemetry when readings or alerts make it relevant.\n- Finish when"
+        : "- Finish when",
+    )
+    .replace(
+      '"next": "telemetry"|"environment"|"documentation"|"verification"|"finish"',
+      hasImages
+        ? '"next": "telemetry"|"environment"|"documentation"|"vision"|"verification"|"finish"'
+        : '"next": "telemetry"|"environment"|"documentation"|"verification"|"finish"',
+    );
 
 const SUPERVISOR_PROMPT = `You are the SUPERVISOR of SENTINEL, a team of AI agents investigating one data center rack.
 You do not call tools. You plan, delegate one task at a time, read the findings, and decide what to do next.
@@ -201,19 +220,29 @@ function clip(s: string, n = MAX_CONTEXT_CHARS): string {
 
 function dataInventory(req: InvestigationRequest, staleAfterMinutes: number) {
   const asOf = new Date(req.as_of ?? Date.now()).getTime();
-  const metrics = new Set([...req.current_telemetry, ...req.recent_telemetry].map((r) => r.metric_type));
+  const metrics = new Set(
+    [...req.current_telemetry, ...req.recent_telemetry].map(
+      (r) => r.metric_type,
+    ),
+  );
   return [...metrics].map((m) => {
     const cur = req.current_telemetry.filter((r) => r.metric_type === m);
     return {
       metric_type: m,
       current_readings: cur.length,
-      stale_current_readings: cur.filter((r) => (asOf - Date.parse(r.observed_at)) / 60000 > staleAfterMinutes).length,
-      history_points: req.recent_telemetry.filter((r) => r.metric_type === m).length,
+      stale_current_readings: cur.filter(
+        (r) => (asOf - Date.parse(r.observed_at)) / 60000 > staleAfterMinutes,
+      ).length,
+      history_points: req.recent_telemetry.filter((r) => r.metric_type === m)
+        .length,
     };
   });
 }
 
-function findingsDigest(findings: SpecialistFinding[], verification: VerificationResult | null) {
+function findingsDigest(
+  findings: SpecialistFinding[],
+  verification: VerificationResult | null,
+) {
   return clip(
     JSON.stringify({
       specialist_findings: findings.map((f) => ({
@@ -254,23 +283,30 @@ function findingsDigest(findings: SpecialistFinding[], verification: Verificatio
   );
 }
 
-export function createAgentToolsets(ds: RackDataSource): Record<AgentName, StructuredToolInterface[]> {
-  const [current, history, profile] = createTools(ds);
-  const docs = createDocumentationTool();
+export function createAgentToolsets(
+  ds: RackDataSource,
+): Record<AgentName, StructuredToolInterface[]> {
+  const [current, history, profile, trends, indicators] = createTools(ds);
+  const docs = createDocumentationTool(ds);
   return {
-    telemetry: [current, history, profile],
+    telemetry: [current, history, profile, trends, indicators],
     environment: [current, history],
     documentation: [docs, profile],
-    verification: [current, history],
+    verification: [current, history, profile, trends, indicators, docs],
     vision: [], // Vision works from the image itself, not from data tools.
   };
 }
 
 // ---------------------------------------------------------------- graph state
 
-type Assignment = { agent: AgentName; objective: string; status: SpecialistFinding["status"] };
+type Assignment = {
+  agent: AgentName;
+  objective: string;
+  status: SpecialistFinding["status"];
+};
 
-const keep = <T>(fallback: () => T) => Annotation<T>({ reducer: (_a, b) => b, default: fallback });
+const keep = <T>(fallback: () => T) =>
+  Annotation<T>({ reducer: (_a, b) => b, default: fallback });
 
 const State = Annotation.Root({
   request: keep<InvestigationRequest | null>(() => null),
@@ -300,14 +336,28 @@ export async function runMultiAgentInvestigation(
   const events: InvestigationEvent[] = [];
   const toolCalls: AgentToolCallRecord[] = [];
   const images = opts.images ?? [];
-  const inspectionMode = request.inspection_mode ?? (images.length ? "COMBINED" : "TELEMETRY");
+  const inspectionMode =
+    request.inspection_mode ?? (images.length ? "COMBINED" : "TELEMETRY");
   const visionModel = opts.visionModel ?? opts.specialistModel;
+  const deterministicTrends = opts.dataSource.getTelemetryTrends(
+    request.rack_id,
+  );
+  const deterministicIndicators = opts.dataSource.getEarlyWarnings(
+    request.rack_id,
+  );
+  const documentationMatch = opts.dataSource.lookupDocumentation(
+    request.equipment_type,
+  );
   const evidence: Evidence = {
     measurements: [],
     history: [],
     configured_thresholds: null,
     documentation: [],
     images: images.map((i) => i.provenance),
+    trends: deterministicTrends,
+    early_warning_indicators: deterministicIndicators.map((i) => ({ ...i })),
+    equipment_identity: request.equipment_identity ?? null,
+    documentation_match: documentationMatch,
   };
   const seen = new Set<string>();
   const emit = (
@@ -315,10 +365,23 @@ export async function runMultiAgentInvestigation(
     description: string,
     status: InvestigationEvent["status"] = "INFO",
     extra: { agent?: string; tool?: string } = {},
-  ) => events.push({ type, timestamp: new Date().toISOString(), description, status, ...extra });
+  ) =>
+    events.push({
+      type,
+      timestamp: new Date().toISOString(),
+      description,
+      status,
+      ...extra,
+    });
 
   const toolsets = createAgentToolsets(opts.dataSource);
   const policySeverity = thresholdSeverity(request, opts.staleAfterMinutes);
+  const requiresVerification =
+    policySeverity !== "NORMAL" ||
+    images.length > 0 ||
+    deterministicIndicators.some(
+      (i) => i.classification === "EARLY_WARNING_TREND",
+    );
   const rackHeader = `Rack "${request.rack_id}" (${request.rack_name}), equipment type: ${request.equipment_type}. Reference time (as_of): ${request.as_of ?? new Date(started).toISOString()}.`;
 
   /** Record actual tool output as evidence (code-compiled, not model-written). */
@@ -345,13 +408,18 @@ export async function runMultiAgentInvestigation(
           from: r.observations[0]?.observed_at,
           to: r.observations.at(-1)?.observed_at,
           stats: r.stats,
-          source_identifiers: [...new Set(r.observations.map((o: any) => o.source_identifier))],
+          source_identifiers: [
+            ...new Set(r.observations.map((o: any) => o.source_identifier)),
+          ],
           simulated: r.observations.every((o: any) => o.simulated),
         });
       }
     }
     if (r.profile) {
-      evidence.configured_thresholds = { ...r.profile, provenance: "FICTIONAL_DEMO_CONFIGURATION" };
+      evidence.configured_thresholds = {
+        ...r.profile,
+        provenance: "FICTIONAL_DEMO_CONFIGURATION",
+      };
     }
     for (const d of r.documents ?? []) {
       const k = `d|${d.doc_id}`;
@@ -363,6 +431,15 @@ export async function runMultiAgentInvestigation(
           source_type: d.source_type,
           verified: d.verified,
           availability: d.availability ?? "AVAILABLE",
+          source_url: d.source_url,
+          section: d.section,
+          technical_facts: d.technical_facts,
+          applicability_conditions: d.applicability_conditions,
+          limitations: d.limitations,
+          manufacturer: d.manufacturer,
+          supported_models: d.supported_models,
+          revision: d.revision,
+          access_date: d.access_date,
         });
       }
     }
@@ -374,11 +451,19 @@ export async function runMultiAgentInvestigation(
     userContent: string | ContentPart[],
     schema: T,
     model: InvestigatorModel = opts.specialistModel,
-  ): Promise<{ output: z.infer<T> | null; records: AgentToolCallRecord[]; status: SpecialistFinding["status"]; problem?: string }> {
+  ): Promise<{
+    output: z.infer<T> | null;
+    records: AgentToolCallRecord[];
+    status: SpecialistFinding["status"];
+    problem?: string;
+  }> {
     const allowed = toolsets[agent];
     const byName = new Map(allowed.map((t) => [t.name, t]));
     const bound = model.bindTools(allowed);
-    const msgs: BaseMessage[] = [new SystemMessage(AGENT_PROMPTS[agent]), new HumanMessage({ content: userContent as HumanMessage["content"] })];
+    const msgs: BaseMessage[] = [
+      new SystemMessage(AGENT_PROMPTS[agent]),
+      new HumanMessage({ content: userContent as HumanMessage["content"] }),
+    ];
     const records: AgentToolCallRecord[] = [];
     let rounds = 0;
     let status: SpecialistFinding["status"] = "COMPLETED";
@@ -386,23 +471,52 @@ export async function runMultiAgentInvestigation(
 
     try {
       while (true) {
-        let resp = await bound.invoke(msgs, { timeout: Math.max(1000, remaining()) });
+        let resp = await bound.invoke(msgs, {
+          timeout: Math.max(1000, remaining()),
+        });
         let calls = resp.tool_calls ?? [];
-        if ((resp.invalid_tool_calls?.length ?? 0) > 0 && calls.length === 0 && rounds < opts.maxSpecialistToolRounds) {
-          emit("AGENT", `${agent} produced a malformed tool call; asking it to retry`, "ERROR", { agent });
+        if (
+          (resp.invalid_tool_calls?.length ?? 0) > 0 &&
+          calls.length === 0 &&
+          rounds < opts.maxSpecialistToolRounds
+        ) {
+          emit(
+            "AGENT",
+            `${agent} produced a malformed tool call; asking it to retry`,
+            "ERROR",
+            { agent },
+          );
           rounds++;
-          msgs.push(new AIMessage(textOf(resp) || "(malformed tool call)"), new HumanMessage("Your tool call was malformed. Retry with valid arguments or give your findings JSON."));
+          msgs.push(
+            new AIMessage(textOf(resp) || "(malformed tool call)"),
+            new HumanMessage(
+              "Your tool call was malformed. Retry with valid arguments or give your findings JSON.",
+            ),
+          );
           continue;
         }
         if (calls.length === 0) {
           text = textOf(resp);
           break;
         }
-        if (rounds >= opts.maxSpecialistToolRounds || remaining() < FINAL_RESERVE_MS) {
+        if (
+          rounds >= opts.maxSpecialistToolRounds ||
+          remaining() < FINAL_RESERVE_MS
+        ) {
           status = "INCOMPLETE";
-          emit("GUARD", `${agent} reached its tool-round or time limit; requesting findings now`, "INFO", { agent });
+          emit(
+            "GUARD",
+            `${agent} reached its tool-round or time limit; requesting findings now`,
+            "INFO",
+            { agent },
+          );
           resp = await model.invoke(
-            [...msgs, new HumanMessage("Your tool budget is used up. Reply now with ONLY the JSON object from your instructions.")],
+            [
+              ...msgs,
+              new HumanMessage(
+                "Your tool budget is used up. Reply now with ONLY the JSON object from your instructions.",
+              ),
+            ],
             { timeout: Math.max(1000, remaining()) },
           );
           text = textOf(resp);
@@ -414,21 +528,43 @@ export async function runMultiAgentInvestigation(
           const t = byName.get(call.name);
           let raw: string;
           if (!t) {
-            raw = JSON.stringify({ error: `Tool "${call.name}" is not available to the ${agent} agent` });
+            raw = JSON.stringify({
+              error: `Tool "${call.name}" is not available to the ${agent} agent`,
+            });
           } else {
             try {
               raw = String(await t.invoke(call.args));
             } catch (err) {
-              raw = JSON.stringify({ error: `Invalid arguments for ${call.name}: ${errMsg(err)}` });
+              raw = JSON.stringify({
+                error: `Invalid arguments for ${call.name}: ${errMsg(err)}`,
+              });
             }
           }
           const { status: st, summary } = summarizeResult(raw);
-          const rec = { agent, round: rounds, tool: call.name, args: call.args, status: st, result_summary: summary };
+          const rec = {
+            agent,
+            round: rounds,
+            tool: call.name,
+            args: call.args,
+            status: st,
+            result_summary: summary,
+          };
           records.push(rec);
           toolCalls.push(rec);
           if (st === "SUCCESS") collectEvidence(raw);
-          emit("TOOL", `[${agent}] ${call.name} ${st === "SUCCESS" ? "returned" : "failed"}: ${summary}`, st, { agent, tool: call.name });
-          msgs.push(new ToolMessage({ content: raw, tool_call_id: call.id ?? `${agent}_${rounds}_${records.length}`, name: call.name }));
+          emit(
+            "TOOL",
+            `[${agent}] ${call.name} ${st === "SUCCESS" ? "returned" : "failed"}: ${summary}`,
+            st,
+            { agent, tool: call.name },
+          );
+          msgs.push(
+            new ToolMessage({
+              content: raw,
+              tool_call_id: call.id ?? `${agent}_${rounds}_${records.length}`,
+              name: call.name,
+            }),
+          );
         }
       }
 
@@ -438,9 +574,20 @@ export async function runMultiAgentInvestigation(
           return { output: schema.parse(extractJson(text)), records, status };
         } catch (err) {
           if (attempt === 1) throw err;
-          emit("AGENT", `${agent} returned malformed findings (${errMsg(err).slice(0, 120)}); requesting one repair`, "ERROR", { agent });
+          emit(
+            "AGENT",
+            `${agent} returned malformed findings (${errMsg(err).slice(0, 120)}); requesting one repair`,
+            "ERROR",
+            { agent },
+          );
           const fix = await model.invoke(
-            [...msgs, new AIMessage(text.slice(0, 4000) || "(empty)"), new HumanMessage(`Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`)],
+            [
+              ...msgs,
+              new AIMessage(text.slice(0, 4000) || "(empty)"),
+              new HumanMessage(
+                `Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`,
+              ),
+            ],
             { timeout: Math.max(1000, remaining()) },
           );
           text = textOf(fix);
@@ -448,39 +595,77 @@ export async function runMultiAgentInvestigation(
       }
     } catch (err) {
       const problem = errMsg(err);
-      const isParse = /JSON|invalid|expected|Required/i.test(problem) && !/\b(4\d\d|5\d\d)\b/.test(problem);
-      emit("ERROR", `${agent} agent ${isParse ? "output invalid" : "model call failed"}: ${problem.slice(0, 200)}`, "ERROR", { agent });
-      return { output: null, records, status: isParse ? "INCOMPLETE" : "FAILED", problem };
+      const isParse =
+        /JSON|invalid|expected|Required/i.test(problem) &&
+        !/\b(4\d\d|5\d\d)\b/.test(problem);
+      emit(
+        "ERROR",
+        `${agent} agent ${isParse ? "output invalid" : "model call failed"}: ${problem.slice(0, 200)}`,
+        "ERROR",
+        { agent },
+      );
+      return {
+        output: null,
+        records,
+        status: isParse ? "INCOMPLETE" : "FAILED",
+        problem,
+      };
     }
     return { output: null, records, status: "INCOMPLETE" };
   }
 
   /** Vision Agent: one multimodal Nemotron call with the actual image, plus one bounded repair. */
-  async function runVision(image: AcceptedImage, objective: string, context: string) {
+  async function runVision(
+    image: AcceptedImage,
+    objective: string,
+    context: string,
+  ) {
     const p = image.provenance;
-    const prov = `Image provenance: image_id=${p.image_id}, filename="${p.filename}", source_type=${p.source_type}, ` +
+    const prov =
+      `Image provenance: image_id=${p.image_id}, filename="${p.filename}", source_type=${p.source_type}, ` +
       `capture_timestamp=${p.capture_timestamp ?? "unknown"}, ${p.width}x${p.height}px${p.source_url ? `, source_url=${p.source_url}` : ""}.`;
     const msgs: BaseMessage[] = [
       new SystemMessage(AGENT_PROMPTS.vision),
       new HumanMessage({
         content: [
-          { type: "text", text: `${rackHeader}\nObjective from the Supervisor: ${objective}\n${prov}${context}` },
+          {
+            type: "text",
+            text: `${rackHeader}\nObjective from the Supervisor: ${objective}\n${prov}${context}`,
+          },
           { type: "image_url", image_url: { url: image.dataUrl } },
         ],
       }),
     ];
     let text = "";
     try {
-      text = textOf(await visionModel.invoke(msgs, { timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS / 2) }));
+      text = textOf(
+        await visionModel.invoke(msgs, {
+          timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS / 2),
+        }),
+      );
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          return { output: VisionOutput.parse(extractJson(text)), status: "COMPLETED" as const };
+          return {
+            output: VisionOutput.parse(extractJson(text)),
+            status: "COMPLETED" as const,
+          };
         } catch (err) {
           if (attempt === 1) throw err;
-          emit("AGENT", `vision returned malformed findings (${errMsg(err).slice(0, 120)}); requesting one repair`, "ERROR", { agent: "vision" });
+          emit(
+            "AGENT",
+            `vision returned malformed findings (${errMsg(err).slice(0, 120)}); requesting one repair`,
+            "ERROR",
+            { agent: "vision" },
+          );
           text = textOf(
             await visionModel.invoke(
-              [...msgs, new AIMessage(text.slice(0, 4000) || "(empty)"), new HumanMessage(`Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`)],
+              [
+                ...msgs,
+                new AIMessage(text.slice(0, 4000) || "(empty)"),
+                new HumanMessage(
+                  `Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`,
+                ),
+              ],
               { timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS / 2) },
             ),
           );
@@ -488,11 +673,26 @@ export async function runMultiAgentInvestigation(
       }
     } catch (err) {
       const problem = errMsg(err);
-      const isParse = /JSON|invalid|expected|Required|Too small/i.test(problem) && !/\b(4\d\d|5\d\d)\b/.test(problem);
-      emit("ERROR", `vision agent ${isParse ? "output invalid" : "model call failed"}: ${problem.slice(0, 200)}`, "ERROR", { agent: "vision" });
-      return { output: null, status: isParse ? ("INCOMPLETE" as const) : ("FAILED" as const), problem };
+      const isParse =
+        /JSON|invalid|expected|Required|Too small/i.test(problem) &&
+        !/\b(4\d\d|5\d\d)\b/.test(problem);
+      emit(
+        "ERROR",
+        `vision agent ${isParse ? "output invalid" : "model call failed"}: ${problem.slice(0, 200)}`,
+        "ERROR",
+        { agent: "vision" },
+      );
+      return {
+        output: null,
+        status: isParse ? ("INCOMPLETE" as const) : ("FAILED" as const),
+        problem,
+      };
     }
-    return { output: null, status: "INCOMPLETE" as const, problem: "no output" };
+    return {
+      output: null,
+      status: "INCOMPLETE" as const,
+      problem: "no output",
+    };
   }
 
   // ---- Supervisor: plan, delegate, review, decide ----
@@ -500,12 +700,20 @@ export async function runMultiAgentInvestigation(
     const limits = [...state.limitsReached];
     const finish = (reason: string, limit?: string): Partial<S> => {
       if (limit && !limits.includes(limit)) limits.push(limit);
-      emit(limit ? "GUARD" : "SUPERVISOR", reason, "INFO", { agent: "supervisor" });
-      return { decision: { plan: undefined, next: "finish", objective: "", reason }, limitsReached: limits };
+      emit(limit ? "GUARD" : "SUPERVISOR", reason, "INFO", {
+        agent: "supervisor",
+      });
+      return {
+        decision: { plan: undefined, next: "finish", objective: "", reason },
+        limitsReached: limits,
+      };
     };
 
     if (remaining() < FINAL_RESERVE_MS) {
-      return finish(`Time budget (${opts.maxInvestigationSeconds}s) nearly used; finishing`, "MAX_INVESTIGATION_SECONDS");
+      return finish(
+        `Time budget (${opts.maxInvestigationSeconds}s) nearly used; finishing`,
+        "MAX_INVESTIGATION_SECONDS",
+      );
     }
 
     const visionRan = state.findings.some((f) => f.agent === "vision");
@@ -515,6 +723,8 @@ export async function runMultiAgentInvestigation(
     const context = `${rackHeader}
 Inspection requested by operator: ${inspectionMode}. ${imageLine}
 Active alerts: ${request.active_alerts.length ? request.active_alerts.map((a) => `[${a.severity}] ${a.message}`).join("; ") : "none"}
+Equipment identity: ${JSON.stringify(request.equipment_identity ?? null)} (operator assertion only; profile/photo never establishes identity).
+Deterministic monitoring evidence: ${clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 12000)}
 Data inventory (counts only): ${JSON.stringify(dataInventory(request, opts.staleAfterMinutes))}
 Budget: ${state.delegations}/${opts.maxDelegations} delegations used; verification runs ${state.verificationRuns}/${opts.maxVerificationRetries + 1}; ~${Math.round(remaining() / 1000)}s left.
 Your plan so far: ${state.plan || "(none yet - include a plan)"}
@@ -522,128 +732,295 @@ Delegations so far: ${state.assignments.length ? state.assignments.map((a) => `$
 Team findings so far: ${state.findings.length || state.verificationResult ? findingsDigest(state.findings, state.verificationResult) : "none"}
 Decide the next step.`;
 
-    const msgs: BaseMessage[] = [new SystemMessage(supervisorPrompt(images.length > 0)), new HumanMessage(context)];
+    const msgs: BaseMessage[] = [
+      new SystemMessage(supervisorPrompt(images.length > 0)),
+      new HumanMessage(context),
+    ];
     let decision: SupervisorDecision | null = null;
     for (let attempt = 0; attempt < 2 && !decision; attempt++) {
       let text: string;
       try {
-        text = textOf(await opts.supervisorModel.invoke(msgs, { timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS) }));
+        text = textOf(
+          await opts.supervisorModel.invoke(msgs, {
+            timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS),
+          }),
+        );
       } catch (err) {
-        emit("ERROR", `Supervisor model call failed: ${errMsg(err)}`, "ERROR", { agent: "supervisor" });
+        emit("ERROR", `Supervisor model call failed: ${errMsg(err)}`, "ERROR", {
+          agent: "supervisor",
+        });
         return { fatalError: errMsg(err) };
       }
       try {
         decision = SupervisorDecision.parse(extractJson(text));
       } catch (err) {
-        emit("SUPERVISOR", `Supervisor returned an invalid decision (${errMsg(err).slice(0, 120)}); requesting one repair`, "ERROR", { agent: "supervisor" });
-        msgs.push(new AIMessage(text.slice(0, 2000) || "(empty)"), new HumanMessage(`Invalid decision (${errMsg(err).slice(0, 300)}). Reply with ONLY the JSON object.`));
+        emit(
+          "SUPERVISOR",
+          `Supervisor returned an invalid decision (${errMsg(err).slice(0, 120)}); requesting one repair`,
+          "ERROR",
+          { agent: "supervisor" },
+        );
+        msgs.push(
+          new AIMessage(text.slice(0, 2000) || "(empty)"),
+          new HumanMessage(
+            `Invalid decision (${errMsg(err).slice(0, 300)}). Reply with ONLY the JSON object.`,
+          ),
+        );
       }
     }
-    if (!decision) return finish("Supervisor could not produce a valid decision; finishing", "SUPERVISOR_OUTPUT_INVALID");
+    if (!decision)
+      return finish(
+        "Supervisor could not produce a valid decision; finishing",
+        "SUPERVISOR_OUTPUT_INVALID",
+      );
 
     const update: Partial<S> = {};
     if (!state.plan && decision.plan) {
       update.plan = decision.plan;
-      emit("SUPERVISOR", `Plan: ${decision.plan}`, "INFO", { agent: "supervisor" });
+      emit("SUPERVISOR", `Plan: ${decision.plan}`, "INFO", {
+        agent: "supervisor",
+      });
     }
 
     // Guards: enforce limits and minimum diligence, always visibly.
     let { next } = decision;
     let objective = decision.objective;
     if (next !== "finish" && state.delegations >= opts.maxDelegations) {
-      return { ...update, ...finish(`Supervisor wanted ${next} but the ${opts.maxDelegations}-delegation limit is reached`, "MAX_DELEGATIONS") };
+      return {
+        ...update,
+        ...finish(
+          `Supervisor wanted ${next} but the ${opts.maxDelegations}-delegation limit is reached`,
+          "MAX_DELEGATIONS",
+        ),
+      };
     }
-    if (next === "verification" && state.verificationRuns > opts.maxVerificationRetries) {
-      return { ...update, ...finish("Verification retry limit reached; finishing", "MAX_VERIFICATION_RETRIES") };
+    if (
+      next === "verification" &&
+      state.verificationRuns > opts.maxVerificationRetries
+    ) {
+      return {
+        ...update,
+        ...finish(
+          "Verification retry limit reached; finishing",
+          "MAX_VERIFICATION_RETRIES",
+        ),
+      };
     }
     if (next === "vision" && !images.length) {
-      emit("GUARD", "Supervisor requested vision but no photograph was supplied; vision is unavailable", "INFO", { agent: "supervisor" });
+      emit(
+        "GUARD",
+        "Supervisor requested vision but no photograph was supplied; vision is unavailable",
+        "INFO",
+        { agent: "supervisor" },
+      );
       next = state.findings.length ? "finish" : "telemetry";
-      objective = next === "telemetry" ? "Check current readings and their freshness against the rack profile thresholds." : "";
+      objective =
+        next === "telemetry"
+          ? "Check current readings and their freshness against the rack profile thresholds."
+          : "";
     }
     if (next === "vision" && visionRan) {
-      emit("GUARD", "Vision already inspected the supplied photograph; not repeating it", "INFO", { agent: "supervisor" });
+      emit(
+        "GUARD",
+        "Vision already inspected the supplied photograph; not repeating it",
+        "INFO",
+        { agent: "supervisor" },
+      );
       next = "finish";
       objective = "";
     }
     // Identical repeat of an earlier task (seen live: the same documentation task 3x) burns budget for nothing.
-    const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (next !== "finish" && next !== "verification" && state.assignments.some((a) => a.agent === next && norm(a.objective) === norm(objective))) {
-      emit("GUARD", `Supervisor repeated an identical ${next} task; not re-running it`, "INFO", { agent: "supervisor" });
-      const needsVerification = (policySeverity !== "NORMAL" || images.length > 0) && state.verificationRuns === 0;
+    const norm = (x: string) =>
+      x
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+    if (
+      next !== "finish" &&
+      next !== "verification" &&
+      state.assignments.some(
+        (a) => a.agent === next && norm(a.objective) === norm(objective),
+      )
+    ) {
+      emit(
+        "GUARD",
+        `Supervisor repeated an identical ${next} task; not re-running it`,
+        "INFO",
+        { agent: "supervisor" },
+      );
+      const needsVerification =
+        requiresVerification && state.verificationRuns === 0;
       next = needsVerification ? "verification" : "finish";
-      objective = needsVerification ? "Independently check the specialist findings against the data before the report is written." : "";
+      objective = needsVerification
+        ? "Independently check the specialist findings against the data before the report is written."
+        : "";
     }
     // Reserve the last delegation for verification when it is required (seen live: the budget was
     // spent on specialists and verification never ran).
-    const verificationRequired = (policySeverity !== "NORMAL" || images.length > 0) && state.verificationRuns === 0;
-    if (next !== "finish" && next !== "verification" && verificationRequired && state.delegations === opts.maxDelegations - 1) {
-      emit("GUARD", `Last delegation reserved for verification (Supervisor wanted ${next})`, "INFO", { agent: "supervisor" });
+    const verificationRequired =
+      requiresVerification && state.verificationRuns === 0;
+    if (
+      next !== "finish" &&
+      next !== "verification" &&
+      verificationRequired &&
+      state.delegations === opts.maxDelegations - 1
+    ) {
+      emit(
+        "GUARD",
+        `Last delegation reserved for verification (Supervisor wanted ${next})`,
+        "INFO",
+        { agent: "supervisor" },
+      );
       next = "verification";
-      objective = "Independently check the specialist findings against the data before the report is written.";
+      objective =
+        "Independently check the specialist findings against the data before the report is written.";
     }
-    if (next === "finish" && images.length && !visionRan && state.delegations < opts.maxDelegations) {
+    if (
+      next === "finish" &&
+      images.length &&
+      !visionRan &&
+      state.delegations < opts.maxDelegations
+    ) {
       next = "vision";
-      objective = "Inspect the operator-supplied photograph and report what is directly visible.";
-      emit("GUARD", "An operator-supplied photograph has not been inspected; routing to vision before finishing", "INFO", { agent: "supervisor" });
-    } else if (next === "finish" && state.findings.length === 0 && state.delegations < opts.maxDelegations) {
+      objective =
+        "Inspect the operator-supplied photograph and report what is directly visible.";
+      emit(
+        "GUARD",
+        "An operator-supplied photograph has not been inspected; routing to vision before finishing",
+        "INFO",
+        { agent: "supervisor" },
+      );
+    } else if (
+      next === "finish" &&
+      state.findings.length === 0 &&
+      state.delegations < opts.maxDelegations
+    ) {
       next = "telemetry";
-      objective = "Check current readings and their freshness against the rack profile thresholds.";
-      emit("GUARD", "Supervisor tried to finish with no evidence; at least one specialist must examine the data", "INFO", { agent: "supervisor" });
-    } else if (next === "finish" && policySeverity !== "NORMAL" && state.verificationRuns === 0 && state.delegations < opts.maxDelegations) {
+      objective =
+        "Check current readings and their freshness against the rack profile thresholds.";
+      emit(
+        "GUARD",
+        "Supervisor tried to finish with no evidence; at least one specialist must examine the data",
+        "INFO",
+        { agent: "supervisor" },
+      );
+    } else if (
+      next === "finish" &&
+      (policySeverity !== "NORMAL" ||
+        deterministicIndicators.some(
+          (i) => i.classification === "EARLY_WARNING_TREND",
+        )) &&
+      state.verificationRuns === 0 &&
+      state.delegations < opts.maxDelegations
+    ) {
       next = "verification";
-      objective = "Independently check the specialist findings against the data before the report is written.";
-      emit("GUARD", `Rack is not clearly normal (${policySeverity}); verification required before finishing`, "INFO", { agent: "supervisor" });
+      objective =
+        "Independently check the specialist findings against the data before the report is written.";
+      emit(
+        "GUARD",
+        `Rack is not clearly normal (${policySeverity}); verification required before finishing`,
+        "INFO",
+        { agent: "supervisor" },
+      );
     }
 
     if (next === "finish") {
-      emit("SUPERVISOR", `Decided to finish: ${decision.reason}`, "INFO", { agent: "supervisor" });
+      emit("SUPERVISOR", `Decided to finish: ${decision.reason}`, "INFO", {
+        agent: "supervisor",
+      });
     } else {
-      emit("SUPERVISOR", `Delegated to ${next}: ${objective}${decision.reason ? ` (reason: ${decision.reason})` : ""}`, "INFO", { agent: "supervisor" });
+      emit(
+        "SUPERVISOR",
+        `Delegated to ${next}: ${objective}${decision.reason ? ` (reason: ${decision.reason})` : ""}`,
+        "INFO",
+        { agent: "supervisor" },
+      );
     }
     return { ...update, decision: { ...decision, next, objective } };
   }
 
   // ---- Specialists ----
-  const specialistNode = (agent: Exclude<AgentName, "verification">) => async (state: S): Promise<Partial<S>> => {
-    const objective = state.decision?.objective || `Investigate rack ${request.rack_id}`;
-    emit("AGENT", `${agent} agent started: ${objective}`, "INFO", { agent });
-    const prior = state.findings.length ? `\nFindings from other agents (use as context, verify with your tools):\n${findingsDigest(state.findings, null)}` : "";
-    const res = await runAgent(agent, `${rackHeader}\nYour objective from the Supervisor: ${objective}${prior}`, SpecialistOutput);
-    const finding: SpecialistFinding = {
-      agent,
-      objective,
-      observations: res.output?.observations ?? [],
-      hypotheses: res.output?.hypotheses ?? [],
-      missing_information: res.output?.missing_information ?? (res.problem ? [`${agent} agent produced no valid findings`] : []),
-      recommended_next_action: res.output?.recommended_next_action ?? "",
-      tools_executed: res.records,
-      status: res.output ? res.status : res.status === "COMPLETED" ? "INCOMPLETE" : res.status,
+  const specialistNode =
+    (agent: Exclude<AgentName, "verification">) =>
+    async (state: S): Promise<Partial<S>> => {
+      const objective =
+        state.decision?.objective || `Investigate rack ${request.rack_id}`;
+      emit("AGENT", `${agent} agent started: ${objective}`, "INFO", { agent });
+      const prior = state.findings.length
+        ? `\nFindings from other agents (use as context, verify with your tools):\n${findingsDigest(state.findings, null)}`
+        : "";
+      const res = await runAgent(
+        agent,
+        `${rackHeader}\nYour objective from the Supervisor: ${objective}${prior}`,
+        SpecialistOutput,
+      );
+      const finding: SpecialistFinding = {
+        agent,
+        objective,
+        observations: res.output?.observations ?? [],
+        hypotheses: res.output?.hypotheses ?? [],
+        missing_information:
+          res.output?.missing_information ??
+          (res.problem ? [`${agent} agent produced no valid findings`] : []),
+        recommended_next_action: res.output?.recommended_next_action ?? "",
+        tools_executed: res.records,
+        status: res.output
+          ? res.status
+          : res.status === "COMPLETED"
+            ? "INCOMPLETE"
+            : res.status,
+      };
+      emit(
+        "AGENT",
+        `${agent} agent ${finding.status.toLowerCase()}: ${finding.observations.length} observation(s), ${finding.hypotheses.length} hypothesis(es), ${res.records.length} tool call(s)`,
+        finding.status === "COMPLETED" ? "SUCCESS" : "ERROR",
+        { agent },
+      );
+      return {
+        findings: [...state.findings, finding],
+        assignments: [
+          ...state.assignments,
+          { agent, objective, status: finding.status },
+        ],
+        delegations: state.delegations + 1,
+      };
     };
-    emit("AGENT", `${agent} agent ${finding.status.toLowerCase()}: ${finding.observations.length} observation(s), ${finding.hypotheses.length} hypothesis(es), ${res.records.length} tool call(s)`, finding.status === "COMPLETED" ? "SUCCESS" : "ERROR", { agent });
-    return {
-      findings: [...state.findings, finding],
-      assignments: [...state.assignments, { agent, objective, status: finding.status }],
-      delegations: state.delegations + 1,
-    };
-  };
 
   // ---- Vision ----
   async function visionNode(state: S): Promise<Partial<S>> {
-    const objective = state.decision?.objective || "Inspect the supplied photograph.";
+    const objective =
+      state.decision?.objective || "Inspect the supplied photograph.";
     const image = images[0];
-    emit("AGENT", `vision agent started on ${image.provenance.image_id} ("${image.provenance.filename}", ${image.provenance.width}x${image.provenance.height}, sha256 ${image.provenance.sha256.slice(0, 12)}…): ${objective}`, "INFO", { agent: "vision" });
-    const prior = state.findings.length ? `\nOther agents' findings (context only; report only what YOU see):\n${findingsDigest(state.findings, null)}` : "";
+    emit(
+      "AGENT",
+      `vision agent started on ${image.provenance.image_id} ("${image.provenance.filename}", ${image.provenance.width}x${image.provenance.height}, sha256 ${image.provenance.sha256.slice(0, 12)}…): ${objective}`,
+      "INFO",
+      { agent: "vision" },
+    );
+    const prior = state.findings.length
+      ? `\nOther agents' findings (context only; report only what YOU see):\n${findingsDigest(state.findings, null)}`
+      : "";
     const res = await runVision(image, objective, prior);
     const o = res.output;
     const finding: SpecialistFinding = {
       agent: "vision",
       objective,
-      observations: o ? o.visual_findings.map((v) => `[${v.certainty}] ${v.observation}${v.image_location ? ` (${v.image_location})` : ""}`) : [],
+      observations: o
+        ? o.visual_findings.map(
+            (v) =>
+              `[${v.certainty}] ${v.observation}${v.image_location ? ` (${v.image_location})` : ""}`,
+          )
+        : [],
       hypotheses: o?.hypotheses ?? [],
       missing_information: o
-        ? [...o.missing_information, ...o.unreadable_regions.map((r) => `Unreadable in image: ${r}`), ...o.additional_photos_needed.map((r) => `Photo needed: ${r}`)]
-        : [`Vision agent produced no valid findings${res.problem ? ` (${res.problem.slice(0, 120)})` : ""}`],
+        ? [
+            ...o.missing_information,
+            ...o.unreadable_regions.map((r) => `Unreadable in image: ${r}`),
+            ...o.additional_photos_needed.map((r) => `Photo needed: ${r}`),
+          ]
+        : [
+            `Vision agent produced no valid findings${res.problem ? ` (${res.problem.slice(0, 120)})` : ""}`,
+          ],
       recommended_next_action: o?.recommended_next_action ?? "",
       tools_executed: [],
       status: res.status,
@@ -652,26 +1029,46 @@ Decide the next step.`;
       unreadable_regions: o?.unreadable_regions ?? [],
       additional_photos_needed: o?.additional_photos_needed ?? [],
     };
-    const certain = finding.visual_findings!.filter((v) => v.certainty === "CERTAIN").length;
-    emit("AGENT", `vision agent ${finding.status.toLowerCase()}: ${finding.visual_findings!.length} visual finding(s) (${certain} certain), ${finding.unreadable_regions!.length} unreadable region(s)`, finding.status === "COMPLETED" ? "SUCCESS" : "ERROR", { agent: "vision" });
+    const certain = finding.visual_findings!.filter(
+      (v) => v.certainty === "CERTAIN",
+    ).length;
+    emit(
+      "AGENT",
+      `vision agent ${finding.status.toLowerCase()}: ${finding.visual_findings!.length} visual finding(s) (${certain} certain), ${finding.unreadable_regions!.length} unreadable region(s)`,
+      finding.status === "COMPLETED" ? "SUCCESS" : "ERROR",
+      { agent: "vision" },
+    );
     return {
       findings: [...state.findings, finding],
-      assignments: [...state.assignments, { agent: "vision", objective, status: finding.status }],
+      assignments: [
+        ...state.assignments,
+        { agent: "vision", objective, status: finding.status },
+      ],
       delegations: state.delegations + 1,
     };
   }
 
   // ---- Verification ----
   async function verificationNode(state: S): Promise<Partial<S>> {
-    const objective = state.decision?.objective || "Verify the specialist findings.";
-    emit("AGENT", `verification agent started: ${objective}`, "INFO", { agent: "verification" });
+    const objective =
+      state.decision?.objective || "Verify the specialist findings.";
+    emit("AGENT", `verification agent started: ${objective}`, "INFO", {
+      agent: "verification",
+    });
     const verifyText = `${rackHeader}\nObjective: ${objective}\nFindings to review:\n${findingsDigest(state.findings, null)}`;
-    const withImage = images.length > 0 && state.findings.some((f) => f.agent === "vision" && f.visual_findings?.length);
+    const withImage =
+      images.length > 0 &&
+      state.findings.some(
+        (f) => f.agent === "vision" && f.visual_findings?.length,
+      );
     const res = withImage
       ? await runAgent(
           "verification",
           [
-            { type: "text", text: `${verifyText}\nThe photograph the Vision Agent inspected is attached so you can check its visual claims yourself.` },
+            {
+              type: "text",
+              text: `${verifyText}\nThe photograph the Vision Agent inspected is attached so you can check its visual claims yourself.`,
+            },
             { type: "image_url", image_url: { url: images[0].dataUrl } },
           ],
           VerificationOutput,
@@ -683,24 +1080,36 @@ Decide the next step.`;
       verified_findings: res.output?.verified_findings ?? [],
       unsupported_claims: res.output?.unsupported_claims ?? [],
       contradictions: res.output?.contradictions ?? [],
-      missing_evidence: res.output?.missing_evidence ?? (res.output ? [] : ["Verification agent produced no valid result"]),
-      request_more_investigation: res.output?.request_more_investigation ?? false,
+      missing_evidence:
+        res.output?.missing_evidence ??
+        (res.output ? [] : ["Verification agent produced no valid result"]),
+      request_more_investigation:
+        res.output?.request_more_investigation ?? false,
       follow_up_agent: res.output?.follow_up_agent ?? null,
       follow_up_objective: res.output?.follow_up_objective ?? null,
       tools_executed: res.records,
-      status: res.output ? res.status : res.status === "COMPLETED" ? "INCOMPLETE" : res.status,
+      status: res.output
+        ? res.status
+        : res.status === "COMPLETED"
+          ? "INCOMPLETE"
+          : res.status,
     };
     emit(
       "VERIFY",
       `Verification ${v.grounded ? "found the findings grounded" : "found grounding problems"}: ${v.verified_findings.length} verified, ${v.unsupported_claims.length} unsupported, ${v.contradictions.length} contradiction(s)` +
-        (v.request_more_investigation ? `; requested follow-up by ${v.follow_up_agent ?? "a specialist"}: ${v.follow_up_objective ?? ""}` : ""),
+        (v.request_more_investigation
+          ? `; requested follow-up by ${v.follow_up_agent ?? "a specialist"}: ${v.follow_up_objective ?? ""}`
+          : ""),
       v.status === "COMPLETED" ? "SUCCESS" : "ERROR",
       { agent: "verification" },
     );
     return {
       verificationResult: v,
       verificationRuns: state.verificationRuns + 1,
-      assignments: [...state.assignments, { agent: "verification", objective, status: v.status }],
+      assignments: [
+        ...state.assignments,
+        { agent: "verification", objective, status: v.status },
+      ],
       delegations: state.delegations + 1,
     };
   }
@@ -708,7 +1117,13 @@ Decide the next step.`;
   // ---- Final synthesis by the Supervisor ----
   let report: MultiAgentReport | null = null;
   async function finalNode(state: S): Promise<Partial<S>> {
-    const names = new Set([opts.supervisorModelName, opts.specialistModelName, ...(images.length ? [opts.visionModelName ?? opts.specialistModelName] : [])]);
+    const names = new Set([
+      opts.supervisorModelName,
+      opts.specialistModelName,
+      ...(images.length
+        ? [opts.visionModelName ?? opts.specialistModelName]
+        : []),
+    ]);
     const modelLabel =
       names.size === 1
         ? opts.supervisorModelName
@@ -727,62 +1142,119 @@ Decide the next step.`;
       inspection_mode: inspectionMode,
       visual_findings: state.findings
         .filter((f) => f.agent === "vision")
-        .flatMap((f) => (f.visual_findings ?? []).map((v) => ({ ...v, image_id: f.image_id ?? "unknown" }))),
+        .flatMap((f) =>
+          (f.visual_findings ?? []).map((v) => ({
+            ...v,
+            image_id: f.image_id ?? "unknown",
+          })),
+        ),
     };
-    const failed = (summary: string, status: "FAILED" | "INCOMPLETE"): MultiAgentReport => ({
+    const failed = (
+      summary: string,
+      status: "FAILED" | "INCOMPLETE",
+    ): MultiAgentReport => ({
       ...base,
       severity: "UNKNOWN",
       summary,
       hypotheses: [],
-      recommended_next_inspection: ["Review the specialist findings and evidence, then retry the investigation."],
+      recommended_next_inspection: [
+        "Review the specialist findings and evidence, then retry the investigation.",
+      ],
       verified_findings: state.verificationResult?.verified_findings ?? [],
       missing_information: [],
       investigation_status: status,
     });
 
     if (state.fatalError) {
-      report = failed(`Investigation failed: the Supervisor model call did not succeed (${state.fatalError}). No diagnosis was produced.`, "FAILED");
-      emit("REPORT", "No report generated because the investigation failed", "ERROR");
+      report = failed(
+        `Investigation failed: the Supervisor model call did not succeed (${state.fatalError}). No diagnosis was produced.`,
+        "FAILED",
+      );
+      emit(
+        "REPORT",
+        "No report generated because the investigation failed",
+        "ERROR",
+      );
       return {};
     }
 
     const msgs: BaseMessage[] = [
       new SystemMessage(supervisorPrompt(images.length > 0)),
       new HumanMessage(
-        `${rackHeader}\nInspection mode: ${inspectionMode}.\nPlan: ${state.plan}\nTeam findings:\n${findingsDigest(state.findings, state.verificationResult)}\n\n${FINAL_PROMPT}\nThe threshold policy applied to fresh readings gives severity ${policySeverity}; the report's severity will be ${policySeverity}, so write the summary consistently with it.`,
+        `${rackHeader}\nDeterministic monitoring evidence: ${clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 14000)}\nInspection mode: ${inspectionMode}.\nPlan: ${state.plan}\nTeam findings:\n${findingsDigest(state.findings, state.verificationResult)}\n\n${FINAL_PROMPT}\nThe threshold policy applied to fresh readings gives severity ${policySeverity}; the report's severity will be ${policySeverity}, so write the summary consistently with it.`,
       ),
     ];
     let lastProblem = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       let text: string;
       try {
-        text = textOf(await opts.supervisorModel.invoke(msgs, { timeout: Math.max(5000, remaining()) }));
+        text = textOf(
+          await opts.supervisorModel.invoke(msgs, {
+            timeout: Math.max(5000, remaining()),
+          }),
+        );
       } catch (err) {
-        emit("ERROR", `Supervisor synthesis call failed: ${errMsg(err)}`, "ERROR", { agent: "supervisor" });
-        report = failed(`Investigation failed while synthesizing the final report (${errMsg(err)}).`, "FAILED");
+        emit(
+          "ERROR",
+          `Supervisor synthesis call failed: ${errMsg(err)}`,
+          "ERROR",
+          { agent: "supervisor" },
+        );
+        report = failed(
+          `Investigation failed while synthesizing the final report (${errMsg(err)}).`,
+          "FAILED",
+        );
         return {};
       }
       try {
         const syn = FinalSynthesis.parse(extractJson(text));
         if (syn.severity !== policySeverity) {
-          emit("GUARD", `Severity adjusted from ${syn.severity} to ${policySeverity} per configured profile thresholds on fresh readings`);
+          emit(
+            "GUARD",
+            `Severity adjusted from ${syn.severity} to ${policySeverity} per configured profile thresholds on fresh readings`,
+          );
           syn.severity = policySeverity;
         }
         const status = state.limitsReached.length ? "INCOMPLETE" : "COMPLETED";
-        report = MultiAgentReport.parse({ ...base, ...syn, investigation_status: status });
-        emit("REPORT", `Supervisor synthesized the final report (severity ${syn.severity}, status ${status})`, "SUCCESS", { agent: "supervisor" });
+        report = MultiAgentReport.parse({
+          ...base,
+          ...syn,
+          investigation_status: status,
+        });
+        emit(
+          "REPORT",
+          `Supervisor synthesized the final report (severity ${syn.severity}, status ${status})`,
+          "SUCCESS",
+          { agent: "supervisor" },
+        );
         return {};
       } catch (err) {
         lastProblem = errMsg(err);
-        emit("REPORT", `Final report output was malformed: ${lastProblem.slice(0, 160)}`, "ERROR", { agent: "supervisor" });
-        msgs.push(new AIMessage(text.slice(0, 4000) || "(empty)"), new HumanMessage(`Invalid (${lastProblem.slice(0, 300)}). Reply with ONLY the corrected JSON object.`));
+        emit(
+          "REPORT",
+          `Final report output was malformed: ${lastProblem.slice(0, 160)}`,
+          "ERROR",
+          { agent: "supervisor" },
+        );
+        msgs.push(
+          new AIMessage(text.slice(0, 4000) || "(empty)"),
+          new HumanMessage(
+            `Invalid (${lastProblem.slice(0, 300)}). Reply with ONLY the corrected JSON object.`,
+          ),
+        );
       }
     }
-    report = failed(`The Supervisor did not return a valid final report after one repair (${lastProblem.slice(0, 200)}). Specialist findings and evidence are included; no diagnosis is asserted.`, "INCOMPLETE");
+    report = failed(
+      `The Supervisor did not return a valid final report after one repair (${lastProblem.slice(0, 200)}). Specialist findings and evidence are included; no diagnosis is asserted.`,
+      "INCOMPLETE",
+    );
     return {};
   }
 
-  const route = (state: S) => (state.fatalError || !state.decision || state.decision.next === "finish" ? "final" : state.decision.next);
+  const route = (state: S) =>
+    state.fatalError || !state.decision || state.decision.next === "finish"
+      ? "final"
+      : state.decision.next;
 
   const graph = new StateGraph(State)
     .addNode("supervisor", supervisor)
@@ -793,7 +1265,14 @@ Decide the next step.`;
     .addNode("verification", verificationNode)
     .addNode("final", finalNode)
     .addEdge(START, "supervisor")
-    .addConditionalEdges("supervisor", route, ["telemetry", "environment", "documentation", "vision", "verification", "final"])
+    .addConditionalEdges("supervisor", route, [
+      "telemetry",
+      "environment",
+      "documentation",
+      "vision",
+      "verification",
+      "final",
+    ])
     .addEdge("telemetry", "supervisor")
     .addEdge("environment", "supervisor")
     .addEdge("documentation", "supervisor")
@@ -802,34 +1281,43 @@ Decide the next step.`;
     .addEdge("final", END)
     .compile();
 
-  emit("START", `Multi-agent investigation started for ${request.rack_name} (${request.rack_id})`);
+  emit(
+    "START",
+    `Multi-agent investigation started for ${request.rack_name} (${request.rack_id})`,
+  );
   try {
-    await graph.invoke({ request }, { recursionLimit: opts.maxDelegations * 2 + 10 });
+    await graph.invoke(
+      { request },
+      { recursionLimit: opts.maxDelegations * 2 + 10 },
+    );
   } catch (err) {
     emit("ERROR", `Graph execution failed: ${errMsg(err)}`, "ERROR");
   }
-  const final: MultiAgentReport =
-    report ?? {
-      rack_id: request.rack_id,
-      severity: "UNKNOWN",
-      summary: "Investigation failed before a report could be produced.",
-      hypotheses: [],
-      recommended_next_inspection: ["Retry the investigation."],
-      tool_calls: toolCalls,
-      investigation_status: "FAILED",
-      model: opts.supervisorModelName,
-      generated_at: new Date().toISOString(),
-      supervisor_plan: "",
-      agents_invoked: [],
-      specialist_findings: [],
-      verification: null,
-      verified_findings: [],
-      missing_information: [],
-      evidence,
-      limits_reached: [],
-      inspection_mode: inspectionMode,
-      visual_findings: [],
-    };
-  emit("END", `Investigation ${final.investigation_status.toLowerCase()} in ${((Date.now() - started) / 1000).toFixed(1)}s`, final.investigation_status === "FAILED" ? "ERROR" : "SUCCESS");
+  const final: MultiAgentReport = report ?? {
+    rack_id: request.rack_id,
+    severity: "UNKNOWN",
+    summary: "Investigation failed before a report could be produced.",
+    hypotheses: [],
+    recommended_next_inspection: ["Retry the investigation."],
+    tool_calls: toolCalls,
+    investigation_status: "FAILED",
+    model: opts.supervisorModelName,
+    generated_at: new Date().toISOString(),
+    supervisor_plan: "",
+    agents_invoked: [],
+    specialist_findings: [],
+    verification: null,
+    verified_findings: [],
+    missing_information: [],
+    evidence,
+    limits_reached: [],
+    inspection_mode: inspectionMode,
+    visual_findings: [],
+  };
+  emit(
+    "END",
+    `Investigation ${final.investigation_status.toLowerCase()} in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+    final.investigation_status === "FAILED" ? "ERROR" : "SUCCESS",
+  );
   return { report: final, events };
 }

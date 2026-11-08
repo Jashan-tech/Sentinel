@@ -84,10 +84,10 @@ test("normal rack: minimal delegation, no forced verification", async () => {
 test("agent-specific tool permissions", async () => {
   const sets = createAgentToolsets(createSnapshotDataSource(fixture("a-normal"), { staleAfterMinutes: 15 }));
   const names = (a: keyof typeof sets) => sets[a].map((t) => t.name).sort();
-  assert.deepEqual(names("telemetry"), ["get_current_telemetry", "get_rack_profile", "get_telemetry_history"]);
+  assert.deepEqual(names("telemetry"), ["analyze_telemetry_trends", "get_current_telemetry", "get_early_warning_indicators", "get_rack_profile", "get_telemetry_history"]);
   assert.deepEqual(names("environment"), ["get_current_telemetry", "get_telemetry_history"]);
   assert.deepEqual(names("documentation"), ["get_rack_profile", "lookup_equipment_documentation"]);
-  assert.deepEqual(names("verification"), ["get_current_telemetry", "get_telemetry_history"]);
+  assert.deepEqual(names("verification"), ["analyze_telemetry_trends", "get_current_telemetry", "get_early_warning_indicators", "get_rack_profile", "get_telemetry_history", "lookup_equipment_documentation"]);
 
   const req = fixture("a-normal");
   const { report } = await run(
