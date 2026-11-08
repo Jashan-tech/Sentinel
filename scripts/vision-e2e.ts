@@ -2,6 +2,7 @@
 // Prerequisites: SpacetimeDB :3000 (sentinel published), agent :3001 (NVIDIA key), dashboard :5173.
 // Uses Rack 01, local Google Chrome, and a real Wikimedia Commons photo from agent/test-assets/vision.
 //   npx tsx scripts/vision-e2e.ts [image-file]
+import { restoreBaseline } from "./demo-baseline";
 import { chromium, expect, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -257,5 +258,7 @@ try {
   if (errors.length) console.error("Page errors:", errors);
   process.exitCode = 1;
 } finally {
+  // Leave the demo calm: resolve the alarm readings this test wrote (SIMULATED demo-baseline).
+  await restoreBaseline({ log: () => {} }).catch(() => {});
   await browser.close();
 }

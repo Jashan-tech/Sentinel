@@ -2,6 +2,7 @@
 // Prerequisites: SpacetimeDB on :3000 with `sentinel` published, agent on :3001 (NVIDIA key set),
 // dashboard on :5173. Uses Rack 01 and the local Google Chrome.
 //   npx tsx scripts/agent-e2e.ts
+import { restoreBaseline } from "./demo-baseline";
 import { chromium, expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
@@ -208,6 +209,8 @@ try {
 
   // 11-12. Change server to Dell PowerEdge R760 (documented 35 warning / 45 critical): 41.5 C is now WARNING.
   await applyProfile(a, "dell-poweredge-r760");
+  // Re-submit so the reading is fresh (60 s freshness) however long the first investigation took.
+  await submit(a, "Ambient temperature", "41.5");
   await expect(b.locator(".alert-item")).toContainText("WARNING");
   const id2 = await runInvestigation(a, known);
   const rec2 = await waitDone(a, id2);
@@ -290,5 +293,7 @@ try {
   if (errors.length) console.error("Page errors:", errors);
   process.exitCode = 1;
 } finally {
+  // Leave the demo calm: resolve the alarm readings this test wrote (SIMULATED demo-baseline).
+  await restoreBaseline({ log: () => {} }).catch(() => {});
   await browser.close();
 }

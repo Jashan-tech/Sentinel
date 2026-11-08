@@ -26,7 +26,8 @@
     "bench": "tsx benchmark/src/main.ts",
     "bench:runner": "tsx benchmark/src/main.ts --serve",
     "bench:register": "node scripts/register-agent.mjs --benchmark",
-    "test:bench-live": "tsx scripts/benchmark-live.ts"
+    "test:bench-live": "tsx scripts/benchmark-live.ts",
+    "demo:reset": "tsx scripts/demo-baseline.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
