@@ -2953,3 +2953,15 @@ html {
 .send-rover-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .send-rover-phase { color: var(--muted); font-weight: 600; text-transform: capitalize; }
 .send-rover-phase.active { color: var(--rover-yellow); animation: rover-blink 1.2s ease-in-out infinite; }
+
+.last-look { display: flex; gap: 14px; align-items: stretch; margin-top: 10px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.last-look img, .last-look-noimg { width: 200px; max-width: 40%; object-fit: cover; aspect-ratio: 16 / 9; background: #000; flex-shrink: 0; }
+.last-look-body { padding: 10px 12px 10px 0; min-width: 0; }
+.last-look-title { font-weight: 700; font-size: 14px; }
+.last-look-title small { color: var(--muted); font-weight: 500; }
+.last-look-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.look-chip { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid; }
+.look-chip.yes { color: var(--green); }
+.look-chip.no { color: var(--red); }
+.last-look-body p { margin: 0; font-size: 13px; color: var(--ink-soft, #ccc); }
+@media (max-width: 600px) { .last-look { flex-direction: column; } .last-look img, .last-look-noimg { width: 100%; max-width: none; } .last-look-body { padding: 0 12px 10px; } }

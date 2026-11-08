@@ -90,7 +90,9 @@ function Tile(props: { icon: "temperature" | "humidity" | "sound"; label: string
   );
 }
 
+interface LastLook { t: string; where: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string }
 interface DispatchStatus {
+  last_look?: LastLook | null;
   armed: boolean;
   last_trigger: string | null;
   triggers?: { temp_c: number; humidity_pct: number; sound_min: number; sound_factor: number };
@@ -135,6 +137,7 @@ function MissionControl() {
               {st.last_trigger && <span className="fired">Last trigger: {st.last_trigger}</span>}
             </div>
           )}
+          <LastLookCard look={st?.last_look} />
           <ol className="rover-mission-log">
             {(st?.log ?? []).slice(-6).map((l, i) => (
               <li key={`${l.t}-${i}`} className={l.m.startsWith("AI sees") ? "ai" : l.m.startsWith("TRIGGER") ? "trig" : ""}>
@@ -199,6 +202,7 @@ export function SendRoverBar({ rackId }: { rackId: string }) {
           {err ? err : st?.running ? `${st.phase}${st.rack ? ` · ${st.rack}` : ""}` : "Rover ready"}
         </span>
       </div>
+      <LastLookCard look={st?.last_look} />
       {recent.length > 0 && (
         <ol className="rover-mission-log">
           {recent.map((l, i) => (
@@ -208,6 +212,26 @@ export function SendRoverBar({ rackId }: { rackId: string }) {
           ))}
         </ol>
       )}
+    </div>
+  );
+}
+
+/** The last frame the rover's AI judged, with its yes/no checks. */
+export function LastLookCard({ look }: { look?: LastLook | null }) {
+  if (!look) return null;
+  const chip = (ok: boolean, label: string) => <span className={`look-chip ${ok ? "yes" : "no"}`}>{ok ? "✓" : "✗"} {label}</span>;
+  return (
+    <div className="last-look">
+      {look.img ? <img src={look.img} alt="Last frame the rover's AI looked at" /> : <div className="last-look-noimg" />}
+      <div className="last-look-body">
+        <div className="last-look-title">What the rover saw · {look.t} <small>({look.where})</small></div>
+        <div className="last-look-chips">
+          {chip(look.rack, "Server rack")}
+          {chip(look.full, "Full rack in frame")}
+          {chip(look.wires, "Wires visible")}
+        </div>
+        <p>{look.reason}</p>
+      </div>
     </div>
   );
 }

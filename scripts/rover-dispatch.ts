@@ -101,6 +101,8 @@ if (!TOKEN) {
 const status = {
   armed: env("ROVER_AUTO_CHECKS", "off") === "on", // off at start so the rover never moves unexpectedly
   last_trigger: null as string | null,
+  /** The last frame the rover's AI looked at, with its verdict (shown on the dashboard). */
+  last_look: null as null | { t: string; where: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string },
   running: false,
   phase: "idle",
   rack: null as string | null,
@@ -470,6 +472,15 @@ const yn = (b: boolean) => (b ? "yes" : "no");
 async function lookAndLog(where: string) {
   phase(`looking (${where})`);
   const l = await look();
+  status.last_look = {
+    t: new Date().toLocaleTimeString(),
+    where,
+    rack: l.rack_visible,
+    full: l.full_rack_visible,
+    wires: l.wires_visible,
+    reason: l.reason,
+    img: await roverThumb(), // small copy of the exact frame the AI judged
+  };
   log(`AI sees [${where}]: rack ${yn(l.rack_visible)}, full rack ${yn(l.full_rack_visible)}, wires ${yn(l.wires_visible)}. ${l.reason}`);
   return l;
 }
