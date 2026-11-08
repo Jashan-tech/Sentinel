@@ -459,7 +459,7 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
   log(`SMART INSPECT ${rackId}: ${why}`);
   let l = await lookAndLog("start");
   if (!l.rack_visible) {
-    log("No server rack in view, so the rover stays put and takes no photo.");
+    log("AI decision: no server rack in view, so the rover stays put and takes no photo. Point the rover at the rack and try again.");
     return;
   }
   if (DRIVE) {
@@ -572,7 +572,7 @@ if (MANUAL_RACK) {
       for (const k of [...seen]) if (k.startsWith(`${a.alertId}:`)) seen.delete(k); // resolved: may fire again later
       return;
     }
-    if (!status.armed) return;
+    // Dashboard alarms always dispatch the rover; the Auto-checks switch only gates live-sensor triggers.
     const isTemp = a.metricType === "AMBIENT_TEMPERATURE_C";
     const isHum = a.metricType === "RELATIVE_HUMIDITY_PERCENT";
     if (!(isTemp && a.severity === "CRITICAL") && !(isHum && (a.severity === "WARNING" || a.severity === "CRITICAL"))) return;
@@ -592,8 +592,9 @@ if (MANUAL_RACK) {
 
   // ---- automatic checks ----
   let lastAuto = 0;
-  const trigger = (reason: string) => {
-    if (!status.armed || busy || Date.now() - lastAuto < COOLDOWN_MS) return;
+  /** live=true: from the rover's own sensors (needs Auto-checks ON). Simulated dashboard values always dispatch. */
+  const trigger = (reason: string, live = false) => {
+    if ((live && !status.armed) || busy || Date.now() - lastAuto < COOLDOWN_MS) return;
     lastAuto = Date.now();
     status.last_trigger = `${new Date().toLocaleTimeString()} ${reason}`;
     log(`TRIGGER: ${reason}`);
@@ -633,15 +634,16 @@ if (MANUAL_RACK) {
     if (s.sound !== null) {
       const bg = soundHist.length >= 10 ? [...soundHist].map((x) => x.v).sort((a, b) => a - b)[Math.floor(soundHist.length / 2)] : null;
       if (bg !== null && s.sound > TRIGGERS.sound_min && s.sound > TRIGGERS.sound_factor * Math.max(bg, 1))
-        trigger(`sudden loud sound: ${s.sound} vs background ${bg}`);
+        trigger(`sudden loud sound: ${s.sound} vs background ${bg}`, true);
       soundHist.push({ t: now, v: s.sound });
       while (soundHist.length && now - soundHist[0].t > 30_000) soundHist.shift();
     }
     if (s.age_s !== null && s.age_s <= 5) {
-      if (s.hum !== null && s.hum > TRIGGERS.humidity_pct) trigger(`humidity ${s.hum}% is above ${TRIGGERS.humidity_pct}%`);
-      if (s.temp_c !== null && s.temp_c > TRIGGERS.temp_c) trigger(`temperature ${s.temp_c} °C is above ${TRIGGERS.temp_c} °C`);
+      if (s.hum !== null && s.hum > TRIGGERS.humidity_pct) trigger(`humidity ${s.hum}% is above ${TRIGGERS.humidity_pct}%`, true);
+      if (s.temp_c !== null && s.temp_c > TRIGGERS.temp_c) trigger(`temperature ${s.temp_c} °C is above ${TRIGGERS.temp_c} °C`, true);
     }
   }, 500);
-  log(`auto-checks ${status.armed ? "ON" : "OFF"}: temp > ${TRIGGERS.temp_c} °C, humidity > ${TRIGGERS.humidity_pct}%, sudden sound > ${TRIGGERS.sound_factor}x background (min ${TRIGGERS.sound_min})`);
+  log("dashboard alarms and simulated values always dispatch the rover");
+  log(`live-sensor auto-checks ${status.armed ? "ON" : "OFF"}: temp > ${TRIGGERS.temp_c} °C, humidity > ${TRIGGERS.humidity_pct}%, sudden sound > ${TRIGGERS.sound_factor}x background (min ${TRIGGERS.sound_min})`);
   log("watching for alerts (Ctrl+C to stop)");
 }

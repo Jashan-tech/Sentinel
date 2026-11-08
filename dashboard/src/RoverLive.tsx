@@ -150,7 +150,7 @@ function MissionControl() {
             onClick={() => void post(`/arm?on=${st?.armed ? 0 : 1}`)}
             title="Automatically send the rover when a trigger fires"
           >
-            Auto-checks {st?.armed ? "ON" : "OFF"}
+            Live auto-checks {st?.armed ? "ON" : "OFF"}
           </button>
           <button className="rover-btn go" disabled={Boolean(err) || st?.running} onClick={() => void post("/patrol")}>
             Start Inspection
