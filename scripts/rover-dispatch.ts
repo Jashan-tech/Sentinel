@@ -765,6 +765,7 @@ const ROUTE = {
   startCm: Number(env("ROUTE_START_CM", "45")), // drive until the box is this far (distance sensor), then start
   diagDeg: Number(env("ROUTE_DIAG_DEG", "45")),
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
+  diagRightCm: Number(env("ROUTE_DIAG_RIGHT_CM", "50")), // a bit further on the photo side
   faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
   faceRightDeg: Number(env("ROUTE_FACE_RIGHT_DEG", "105")), // a bit more so the wired side fills the photo
   pauseMs: Number(env("ROUTE_PAUSE_MS", "2000")),
@@ -780,17 +781,29 @@ async function showView(where: string, view: string, note: string, wires: boolea
   status.last_look = { t: new Date().toLocaleTimeString(), where, view, rack: true, full: true, wires, reason: note, img: await roverThumb() };
 }
 
-/** Ask Nemotron if the cabled rack is in view; if not, try small turns left/right (recorded, so home still works). */
+/** Ask Nemotron if the cabled rack is in view. If the box is partly in view, nudge toward it
+ *  (small turn + a little push forward); otherwise scan left/right. All moves are recorded for the way home. */
 async function findWiresNearby(where: string): Promise<boolean> {
   const step = Number(env("ROUTE_SCAN_DEG", "20"));
-  let at = 0; // current offset in degrees: negative = left
-  for (const target of [0, -step, -2 * step, step, 2 * step]) {
+  const pushCm = Number(env("ROUTE_PUSH_CM", "8"));
+  let l = await lookAndLog(where);
+  for (let i = 0; i < 3 && l.view !== "OPEN_RACK_CABLES" && l.rack_visible && l.x !== null; i++) {
     checkAbort();
-    if (target !== at) { const d = target - at; await turnDeg(d < 0 ? "left" : "right", Math.abs(d)); at = target; }
-    const l = await lookAndLog(target === 0 ? where : `${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
+    const errDeg = (l.x - 0.5) * FOV_DEG;
+    if (Math.abs(errDeg) >= 8) await turnDeg(errDeg > 0 ? "right" : "left", Math.min(12, Math.abs(errDeg) * 0.6));
+    const d = (await sensors()).dist_cm;
+    if (d === null || d > 30) { log(`Nudging ${pushCm} cm closer to the box.`); await fwd(cmToMs(pushCm)); await sleep(300); }
+    l = await lookAndLog(`${where} (nudged)`);
+  }
+  if (l.view === "OPEN_RACK_CABLES") return true;
+  let at = 0; // scan offset in degrees: negative = left
+  for (const target of [-step, -2 * step, step, 2 * step]) {
+    checkAbort();
+    const dd = target - at; await turnDeg(dd < 0 ? "left" : "right", Math.abs(dd)); at = target;
+    l = await lookAndLog(`${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
     if (l.view === "OPEN_RACK_CABLES") return true;
   }
-  if (at !== 0) await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
+  await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
   return false;
 }
 
@@ -842,7 +855,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   phase("going to the right side", rackId);
   log("Checking the right side.");
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
-  await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
+  await fwd(cmToMs(ROUTE.diagRightCm)); await sleep(300);
   await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
   if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("right side", "left"); }
   phase("taking photo", rackId);
