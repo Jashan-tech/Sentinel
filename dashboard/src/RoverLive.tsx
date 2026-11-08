@@ -1,9 +1,12 @@
 // Rover Live: real readings and camera feed straight from the rover (Jetson), polled fast for demos.
 // The Vite dev server proxies /api/rover to ROVER_URL, so the browser only ever talks to localhost.
 import { useEffect, useRef, useState } from "react";
+import { useTable } from "spacetimedb/react";
+import { tables } from "./module_bindings";
 import Icon from "./Icon";
 
 const ROVER = "/api/rover";
+const DISPATCH = "/api/dispatch";
 const POLL_MS = 500;
 
 interface Reading {
@@ -87,6 +90,129 @@ function Tile(props: { icon: "temperature" | "humidity" | "sound"; label: string
   );
 }
 
+interface DispatchStatus {
+  running: boolean;
+  phase: string;
+  rack: string | null;
+  log: { t: string; m: string }[];
+}
+
+function MissionControl() {
+  const [st, setSt] = useState<DispatchStatus | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${DISPATCH}/status`, { cache: "no-store", signal: AbortSignal.timeout(2000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = (await r.json()) as DispatchStatus;
+        if (alive) { setSt(d); setErr(""); }
+      } catch {
+        if (alive) setErr("Dispatcher not running");
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 700);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  const post = (path: string) => fetch(`${DISPATCH}${path}`, { method: "POST" }).catch(() => setErr("Dispatcher not running"));
+  return (
+    <div className="rover-mission">
+      <div className="rover-mission-row">
+        <div>
+          <div className="rover-mission-phase">
+            {err ? err : st?.running ? `${st.phase}${st.rack ? ` · ${st.rack}` : ""}` : "Ready"}
+          </div>
+          <ol className="rover-mission-log">
+            {(st?.log ?? []).slice(-6).map((l, i) => (
+              <li key={`${l.t}-${i}`} className={l.m.startsWith("AI sees") ? "ai" : ""}>
+                <span>{l.t}</span> {l.m}
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="rover-mission-buttons">
+          <button className="rover-btn go" disabled={Boolean(err) || st?.running} onClick={() => void post("/patrol")}>
+            Start Inspection
+          </button>
+          <button className="rover-btn stop" disabled={Boolean(err)} onClick={() => void post("/stop")}>
+            Stop
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type Obj = Record<string, unknown>;
+const parse = (s: string): Obj => {
+  try { return JSON.parse(s) as Obj; } catch { return {}; }
+};
+const sevClass = (s: string) => (s === "CRITICAL" ? "crit" : s === "WARNING" ? "warn" : s === "NORMAL" ? "ok" : "unk");
+
+function RoverInspections() {
+  const [investigations] = useTable(tables.investigation);
+  const [images] = useTable(tables.investigationImage);
+  const rover = images
+    .filter((i) => i.sourceType === "ROVER_CAMERA")
+    .map((img) => ({ img, inv: investigations.find((v) => v.investigationId === img.investigationId) }))
+    .filter((x) => x.inv)
+    .sort((a, b) => (a.img.uploadedAt.microsSinceUnixEpoch < b.img.uploadedAt.microsSinceUnixEpoch ? 1 : -1))
+    .slice(0, 4);
+  if (!rover.length)
+    return <p className="rover-live-foot">No rover inspections yet. Start a patrol to capture the first photo.</p>;
+  return (
+    <div className="rover-inspections">
+      {rover.map(({ img, inv }, idx) => {
+        const report = parse(inv!.reportJson);
+        const snap = parse(inv!.snapshotJson);
+        const readings = (Array.isArray(snap.current_telemetry) ? snap.current_telemetry : []) as Obj[];
+        const r = (m: string) => readings.find((x) => x.metric_type === m && x.source_type === "ROVER");
+        const visual = (Array.isArray(report.visual_findings) ? report.visual_findings : []) as Obj[];
+        const concerns = visual.filter((v) => v.potential_concern);
+        const running = inv!.status === "RUNNING";
+        const when = new Date(Number(img.uploadedAt.microsSinceUnixEpoch / 1000n)).toLocaleTimeString();
+        return (
+          <article key={img.investigationId} className={`rover-inspection ${idx === 0 ? "latest" : ""}`}>
+            <div className="rover-inspection-photo">
+              {img.thumbnailDataUrl ? <img src={img.thumbnailDataUrl} alt={`Rover photo of ${inv!.rackId}`} /> : <div className="noimg">No preview</div>}
+              <span className="rover-photo-tag">ROVER CAMERA · {when}</span>
+            </div>
+            <div className="rover-inspection-body">
+              <div className="rover-inspection-head">
+                <h3>{inv!.rackId.replace("rack-", "Rack 0")}</h3>
+                <span className={`rover-sev ${running ? "run" : sevClass(inv!.severity)}`}>{running ? "AI INVESTIGATING…" : inv!.severity}</span>
+              </div>
+              <div className="rover-readings">
+                <span>{String(r("AMBIENT_TEMPERATURE_C")?.numeric_value ?? "--")} °C</span>
+                <span>{String(r("RELATIVE_HUMIDITY_PERCENT")?.numeric_value ?? "--")} %RH</span>
+                <span>Sound {String(r("SOUND_RAW")?.numeric_value ?? "--")}</span>
+              </div>
+              {!running && (
+                <>
+                  <p className="rover-headline">{String(report.headline ?? report.summary ?? "")}</p>
+                  {concerns.length > 0 ? (
+                    <ul className="rover-concerns">
+                      {concerns.slice(0, 4).map((c, i) => (
+                        <li key={i}>
+                          <b>{String(c.component ?? "")}</b>: {String(c.potential_concern)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : visual.length > 0 ? (
+                    <p className="rover-clear">No visual concerns found in the photo.</p>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function RoverLive() {
   const { data, error, history } = useRover();
   const [streamKey, setStreamKey] = useState(0);
@@ -105,12 +231,18 @@ export function RoverLive() {
         </span>
       </header>
 
+      <MissionControl />
+
       <div className="rover-tiles">
         <Tile icon="temperature" label="Temperature" value={data?.temp_c} unit="°C" digits={1} series={history.map((h) => h.temp)} color="var(--amber)" />
         <Tile icon="humidity" label="Humidity" value={data?.hum} unit="%RH" digits={0} series={history.map((h) => h.hum)} color="var(--cyan)" />
         <Tile icon="sound" label="Sound (raw)" value={data?.sound} unit="" digits={0} series={history.map((h) => h.sound)} color="var(--green)" />
       </div>
 
+      <h2 className="rover-section">Rover inspections</h2>
+      <RoverInspections />
+
+      <h2 className="rover-section">Live camera</h2>
       <div className={`rover-feed ${offline ? "off" : ""}`}>
         <img key={streamKey} src={`${ROVER}/stream?k=${streamKey}`} alt="Live rover camera" onError={() => setTimeout(() => setStreamKey((k) => k + 1), 2000)} />
         <span className="rover-feed-tag">

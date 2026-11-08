@@ -55,11 +55,29 @@ const SPACETIME_WS = SPACETIME_HTTP.replace(/^http/, "ws");
 const DATABASE = env("SPACETIME_DATABASE", "sentinel");
 const TOKEN = env("SPACETIME_AGENT_TOKEN");
 const AGENT_URL = env("AGENT_URL", `http://127.0.0.1:${env("PORT", "3001")}`).replace(/\/$/, "");
-const DRIVE_SPEED = Number(env("ROVER_DRIVE_SPEED", "40")); // -100..100
-const DRIVE_MS = Math.min(3000, Number(env("ROVER_DRIVE_MS", "1500"))); // hard cap 3 s per leg
 const SENSOR_SAMPLES = 3;
 const STALE_AFTER_SECONDS = Number(env("STALE_AFTER_MINUTES", "15")) * 60;
 const COOLDOWN_MS = 60_000;
+const APPROACH_CM = Number(env("ROVER_APPROACH_CM", "15")); // stop this far from the box (front tip)
+const APPROACH_SPEED = Number(env("ROVER_APPROACH_SPEED", "30"));
+const APPROACH_MAX_MS = Number(env("ROVER_APPROACH_MAX_MS", "8000"));
+const BACKUP_MS = Number(env("ROVER_BACKUP_MS", "700"));
+const TURN_SPEED = Number(env("ROVER_TURN_SPEED", "35"));
+const TURN_MS = Number(env("ROVER_TURN_MS", "700")); // roughly 90 degrees; calibrate on the floor
+const CONTROL_PORT = Number(env("ROVER_CONTROL_PORT", "3002"));
+const NVIDIA_API_KEY = env("NVIDIA_API_KEY");
+const NVIDIA_BASE_URL = env("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").replace(/\/$/, "");
+const NVIDIA_MODEL = env("NVIDIA_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b");
+const INSPECT_RACK = env("ROVER_RACK", "rack-1");
+const MAX_REPOSITION = Number(env("ROVER_MAX_REPOSITION", "2"));
+type PatrolStep = { rack: string } | { turn: "left" | "right"; ms?: number } | { forward: number } | { back: number };
+// Hard-coded "move left for a better angle" maneuver (the rover cannot strafe). Calibrate on the floor.
+const LEFT_MOVE: PatrolStep[] = JSON.parse(
+  env("ROVER_LEFT_MOVE", JSON.stringify([{ back: 500 }, { turn: "left", ms: 450 }, { forward: 900 }, { turn: "right", ms: 700 }])),
+);
+const PATROL: PatrolStep[] = JSON.parse(
+  env("ROVER_PATROL", JSON.stringify([{ rack: "rack-1" }, { turn: "right" }, { rack: "rack-2" }])),
+);
 const DRIVE = !flag("--no-drive");
 const MANUAL_RACK = opt("--rack");
 
@@ -72,7 +90,23 @@ if (!TOKEN) {
   process.exit(2);
 }
 
-const log = (m: string) => console.log(`[rover ${new Date().toLocaleTimeString()}] ${m}`);
+// Live status for the dashboard (GET /status on the control port).
+const status = {
+  running: false,
+  phase: "idle",
+  rack: null as string | null,
+  log: [] as { t: string; m: string }[],
+};
+const log = (m: string) => {
+  const t = new Date().toLocaleTimeString();
+  console.log(`[rover ${t}] ${m}`);
+  status.log.push({ t, m });
+  if (status.log.length > 40) status.log.shift();
+};
+const phase = (p: string, rack: string | null = status.rack) => {
+  status.phase = p;
+  status.rack = rack;
+};
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------- rover HTTP ----------------
@@ -106,6 +140,18 @@ function jpegSize(b: Uint8Array): { width: number; height: number } {
   throw new Error("could not read JPEG dimensions");
 }
 
+/** Smaller copy of the photo just taken (Jetson /thumb), as a data URL the dashboard can store and show. */
+async function roverThumb(): Promise<string> {
+  try {
+    const res = await fetch(`${ROVER_URL}/thumb`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return "";
+    const url = `data:image/jpeg;base64,${Buffer.from(await res.arrayBuffer()).toString("base64")}`;
+    return url.length <= 58_000 ? url : "";
+  } catch {
+    return "";
+  }
+}
+
 async function photo(): Promise<ImageAttachment> {
   const res = await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`rover /snap -> HTTP ${res.status}`);
@@ -122,7 +168,7 @@ async function photo(): Promise<ImageAttachment> {
     byteSize: bytes.length,
     width,
     height,
-    thumbnailDataUrl: "", // optional preview; provenance is still stored
+    thumbnailDataUrl: await roverThumb(), // dashboard preview of this exact photo (<60 KB)
     sourceType: "ROVER_CAMERA",
     captureTimestamp: now.toISOString(),
     sourceUrl: "",
@@ -236,6 +282,7 @@ async function investigate(db: DbConnection, rackId: string, image: ImageAttachm
     thumbnailDataUrl: image.thumbnailDataUrl,
   });
   log(`investigation ${investigationId} started; Nemotron agents are working (watch the dashboard)`);
+  phase("AI investigating", rackId);
   try {
     const res = await fetch(`${AGENT_URL}/investigate`, {
       method: "POST",
@@ -253,43 +300,209 @@ async function investigate(db: DbConnection, rackId: string, image: ImageAttachm
   }
 }
 
-// ---------------- mission ----------------
+// ---------------- missions ----------------
 let busy = false;
-async function mission(db: DbConnection, rackId: string, why: string) {
-  if (busy) return;
-  busy = true;
-  let drove = false;
-  try {
-    log(`MISSION ${rackId}: ${why}`);
-    if (DRIVE) {
-      log(`driving to ${rackId} (${DRIVE_MS} ms at ${DRIVE_SPEED})`);
-      await drive(DRIVE_SPEED, DRIVE_MS);
-      drove = true;
-      await sleep(800); // let the chassis settle before the photo
-    }
-    const image = await photo();
-    log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
-    for (let i = 0; i < SENSOR_SAMPLES; i++) {
-      const s = await sensors();
-      if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
-      const n = await recordReadings(db, rackId, s);
-      log(`rover reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound}, distance ${s.dist_cm} cm (${n} recorded)`);
-      if (i < SENSOR_SAMPLES - 1) await sleep(2000);
-    }
-    await investigate(db, rackId, image);
-  } catch (e) {
-    log(`mission aborted: ${(e as Error).message}`);
-  } finally {
-    if (drove) {
-      try {
-        log("driving back");
-        await drive(-DRIVE_SPEED, DRIVE_MS);
-      } catch (e) {
-        log(`could not drive back: ${(e as Error).message}`);
-      }
-    }
-    busy = false;
+let abort = false;
+const checkAbort = () => {
+  if (abort) throw new Error("stopped by operator");
+};
+
+async function approach() {
+  const r = await roverText(`/approach?target=${APPROACH_CM}&speed=${APPROACH_SPEED}&max_ms=${APPROACH_MAX_MS}`, APPROACH_MAX_MS + 10_000);
+  log(`approach: ${r}`);
+  if (!r.includes("stop=OK")) throw new Error(`approach did not stop cleanly: ${r}`);
+  if (r.includes("reason=no-distance")) throw new Error("distance sensor went quiet; stopped for safety");
+}
+
+/** Drive up to the rack, photograph it, record real readings, run the AI, back away. */
+async function inspect(db: DbConnection, rackId: string, why: string) {
+  log(`INSPECT ${rackId}: ${why}`);
+  if (DRIVE) {
+    phase("driving to rack", rackId);
+    await approach();
+    checkAbort();
+    await sleep(700); // let the chassis settle before the photo
   }
+  phase("taking photo", rackId);
+  const image = await photo();
+  log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB${image.thumbnailDataUrl ? "" : " (no preview)"}`);
+  phase("reading sensors", rackId);
+  for (let i = 0; i < SENSOR_SAMPLES; i++) {
+    const s = await sensors();
+    if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
+    const n = await recordReadings(db, rackId, s);
+    log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound}, distance ${s.dist_cm} cm (${n} recorded)`);
+    if (i < SENSOR_SAMPLES - 1) await sleep(1500);
+  }
+  checkAbort();
+  await investigate(db, rackId, image);
+  checkAbort();
+  if (DRIVE) {
+    phase("backing away", rackId);
+    await drive(-APPROACH_SPEED, BACKUP_MS);
+  }
+}
+
+async function run(name: string, body: () => Promise<void>) {
+  if (busy) {
+    log(`busy; ignoring ${name}`);
+    return false;
+  }
+  busy = true;
+  abort = false;
+  status.running = true;
+  try {
+    await body();
+    log(`${name} complete`);
+  } catch (e) {
+    log(`${name} aborted: ${(e as Error).message}`);
+    await roverText("/cmd?c=S").catch(() => {});
+  } finally {
+    busy = false;
+    status.running = false;
+    phase("idle", null);
+  }
+  return true;
+}
+
+async function patrol(db: DbConnection) {
+  log(`PATROL: ${PATROL.map((s) => ("rack" in s ? s.rack : "turn" in s ? `turn ${s.turn}` : "forward" in s ? `forward ${s.forward}ms` : `back ${s.back}ms`)).join(" -> ")}`);
+  for (const step of PATROL) {
+    checkAbort();
+    if ("rack" in step) await inspect(db, step.rack, "patrol");
+    else if (!DRIVE) continue;
+    else if ("turn" in step) {
+      phase(`turning ${step.turn}`);
+      const sp = step.turn === "right" ? TURN_SPEED : -TURN_SPEED;
+      log(`turn ${step.turn}: ${await driveLR(sp, -sp, step.ms ?? TURN_MS)}`);
+    } else if ("forward" in step) {
+      phase("driving");
+      await drive(APPROACH_SPEED, step.forward);
+    } else if ("back" in step) {
+      phase("backing up");
+      await drive(-APPROACH_SPEED, step.back);
+    }
+    await sleep(400);
+  }
+}
+
+// ---------------- quick look (Nemotron VL, thinking off, ~2 s) ----------------
+interface Look { rack_visible: boolean; full_rack_visible: boolean; wires_visible: boolean; reason: string }
+const LOOK_PROMPT =
+  "You are the eyes of a data-center inspection rover. Look at this camera frame and answer ONLY with JSON: " +
+  '{"rack_visible": bool, "full_rack_visible": bool, "wires_visible": bool, "reason": string}. ' +
+  "rack_visible: a server rack or rack-mounted equipment is in view (a printed photo of a rack counts). " +
+  "full_rack_visible: the whole rack face fits in the frame and is not badly cut off. " +
+  "wires_visible: network or power cables / wiring are visible on that rack (ignore ceiling or room wiring). " +
+  "reason: one short plain-English sentence explaining what you see.";
+async function look(): Promise<Look> {
+  if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing in agent/.env");
+  const res = await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`rover /snap -> HTTP ${res.status}`);
+  const b64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+  const r = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${NVIDIA_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: NVIDIA_MODEL,
+      temperature: 0,
+      max_tokens: 300,
+      chat_template_kwargs: { enable_thinking: false },
+      messages: [{ role: "user", content: [{ type: "text", text: LOOK_PROMPT }, { type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } }] }],
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const body = (await r.json()) as { choices?: { message?: { content?: string } }[]; error?: unknown };
+  const text = body.choices?.[0]?.message?.content ?? "";
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!r.ok || !m) throw new Error(`vision check failed (HTTP ${r.status})`);
+  const j = JSON.parse(m[0]) as Partial<Look>;
+  return {
+    rack_visible: j.rack_visible === true,
+    full_rack_visible: j.full_rack_visible === true,
+    wires_visible: j.wires_visible === true,
+    reason: String(j.reason ?? "").slice(0, 300),
+  };
+}
+const yn = (b: boolean) => (b ? "yes" : "no");
+async function lookAndLog(where: string) {
+  phase(`looking (${where})`);
+  const l = await look();
+  log(`AI sees [${where}]: rack ${yn(l.rack_visible)}, full rack ${yn(l.full_rack_visible)}, wires ${yn(l.wires_visible)}. ${l.reason}`);
+  return l;
+}
+
+async function runMoves(steps: PatrolStep[]) {
+  for (const step of steps) {
+    checkAbort();
+    if ("turn" in step) {
+      const sp = step.turn === "right" ? TURN_SPEED : -TURN_SPEED;
+      await driveLR(sp, -sp, step.ms ?? TURN_MS);
+    } else if ("forward" in step) await drive(APPROACH_SPEED, step.forward);
+    else if ("back" in step) await drive(-APPROACH_SPEED, step.back);
+    await sleep(300);
+  }
+}
+
+/** Look first; approach only a visible rack; photograph it only when the full rack AND wires are in view.
+ *  No wires on this face -> hard-coded move left for a better angle, then look again. */
+async function smartInspect(db: DbConnection, rackId: string, why: string) {
+  log(`SMART INSPECT ${rackId}: ${why}`);
+  let l = await lookAndLog("start");
+  if (!l.rack_visible) {
+    log("No server rack in view, so the rover stays put and takes no photo.");
+    return;
+  }
+  if (DRIVE) {
+    phase("driving to rack", rackId);
+    await approach();
+    checkAbort();
+    await sleep(600);
+    l = await lookAndLog("at rack");
+    if (l.rack_visible && !l.full_rack_visible) {
+      log("Rack is cut off in the frame; backing up for the full view.");
+      phase("backing up for full view", rackId);
+      await drive(-APPROACH_SPEED, 500);
+      await sleep(500);
+      l = await lookAndLog("backed up");
+    }
+  }
+  let tries = 0;
+  while (l.rack_visible && l.full_rack_visible && !l.wires_visible && tries < MAX_REPOSITION && DRIVE) {
+    tries++;
+    log(`No wires visible on this side of the rack; moving left for a better angle (attempt ${tries}/${MAX_REPOSITION}).`);
+    phase("moving left for a better angle", rackId);
+    await runMoves(LEFT_MOVE);
+    await sleep(500);
+    l = await lookAndLog(`left ${tries}`);
+  }
+  if (!l.rack_visible || !l.full_rack_visible) {
+    log("Full rack not in view, so no photo was taken.");
+    return;
+  }
+  if (!l.wires_visible) {
+    log("Still no wires visible after repositioning, so no photo was taken.");
+    return;
+  }
+  log("Full rack with wiring in view: taking the inspection photo.");
+  phase("taking photo", rackId);
+  const image = await photo();
+  log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB${image.thumbnailDataUrl ? "" : " (no preview)"}`);
+  phase("reading sensors", rackId);
+  for (let i = 0; i < SENSOR_SAMPLES; i++) {
+    const s = await sensors();
+    if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
+    const n = await recordReadings(db, rackId, s);
+    log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound}, distance ${s.dist_cm} cm (${n} recorded)`);
+    if (i < SENSOR_SAMPLES - 1) await sleep(1500);
+  }
+  checkAbort();
+  await investigate(db, rackId, image);
+}
+
+// drive() with opposite wheel speeds turns in place
+async function driveLR(l: number, r: number, ms: number) {
+  return roverText(`/drive?l=${l}&r=${r}&ms=${ms}`, ms + 10_000);
 }
 
 // ---------------- main ----------------
@@ -300,10 +513,44 @@ const db = await connect();
 log(`connected to SpacetimeDB ${DATABASE} as authorized agent`);
 
 if (MANUAL_RACK) {
-  await mission(db, MANUAL_RACK, "manual dispatch");
+  await run(`inspection of ${MANUAL_RACK}`, () => smartInspect(db, MANUAL_RACK, "manual dispatch"));
+  db.disconnect();
+  setTimeout(() => process.exit(0), 200).unref();
+} else if (flag("--patrol")) {
+  await run("patrol", () => patrol(db));
   db.disconnect();
   setTimeout(() => process.exit(0), 200).unref();
 } else {
+  // Control API for the dashboard (proxied by Vite at /api/dispatch). Localhost only.
+  const { createServer } = await import("node:http");
+  createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const json = (code: number, body: unknown) => {
+      res.writeHead(code, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (req.method === "GET" && url.pathname === "/status") return json(200, { ...status, rack_target: INSPECT_RACK });
+    if (req.method === "POST" && url.pathname === "/patrol") {
+      if (busy) return json(409, { error: "rover is busy" });
+      void run("inspection", () => smartInspect(db, INSPECT_RACK, "dashboard Start"));
+      return json(202, { started: true });
+    }
+    if (req.method === "POST" && url.pathname === "/inspect") {
+      const rack = url.searchParams.get("rack") ?? "";
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(rack)) return json(400, { error: "bad rack" });
+      if (busy) return json(409, { error: "rover is busy" });
+      void run(`inspection of ${rack}`, () => smartInspect(db, rack, "dashboard request"));
+      return json(202, { started: true });
+    }
+    if (req.method === "POST" && url.pathname === "/stop") {
+      abort = true;
+      void roverText("/cmd?c=S").catch(() => {});
+      log("STOP requested");
+      return json(200, { stopping: true });
+    }
+    json(404, { error: "not found" });
+  }).listen(CONTROL_PORT, "127.0.0.1", () => log(`control API on http://127.0.0.1:${CONTROL_PORT}`));
+
   const lastMission = new Map<string, number>();
   const seen = new Set([...db.db.rackAlert.iter()].filter((a) => a.active).map((a) => `${a.alertId}:${a.severity}`));
   const consider = (a: { alertId: string; rackId: string; metricType: string; severity: string; active: boolean }) => {
@@ -320,7 +567,9 @@ if (MANUAL_RACK) {
     if (reading?.sourceType !== "SIMULATOR") return; // only simulated alarms dispatch the rover
     if (Date.now() - (lastMission.get(a.rackId) ?? 0) < COOLDOWN_MS) return;
     lastMission.set(a.rackId, Date.now());
-    void mission(db, a.rackId, `${a.severity} ${a.metricType} alert (simulated ${reading.numericValue} ${reading.unit})`);
+    void run(`inspection of ${a.rackId}`, () =>
+      smartInspect(db, a.rackId, `${a.severity} ${a.metricType} alert (simulated ${reading.numericValue} ${reading.unit})`),
+    );
   };
   db.db.rackAlert.onInsert((_ctx, a) => consider(a));
   db.db.rackAlert.onUpdate((_ctx, _old, a) => consider(a));

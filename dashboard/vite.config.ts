@@ -7,6 +7,12 @@ export default defineConfig({
     strictPort: true,
     // Feature 2 agent service. The NVIDIA key stays server-side in agent/.env.
     proxy: {
+      // Rover dispatcher control API (Start Patrol / Stop / status).
+      "/api/dispatch": {
+        target: process.env.DISPATCH_URL ?? "http://127.0.0.1:3002",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/dispatch/, ""),
+      },
       // Rover Live page: the rover's Jetson HTTP server (sensors + camera). Set ROVER_URL when starting.
       "/api/rover": {
         // Object form so bracketed IPv6 addresses (iPhone hotspot) work.

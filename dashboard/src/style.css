@@ -2902,3 +2902,42 @@ html {
 .rover-feed-tag { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 7px; background: rgba(0, 0, 0, 0.65); color: var(--rover-yellow); padding: 5px 10px; border-radius: 8px; font-weight: 700; font-size: 12px; letter-spacing: 0.08em; }
 .rover-feed-tag i { width: 9px; height: 9px; border-radius: 50%; background: var(--rover-yellow); animation: rover-blink 1s ease-in-out infinite; }
 .rover-live-foot { color: var(--muted); font-size: 13px; margin: 0; }
+
+.rover-section { margin: 6px 0 0; font-size: 18px; }
+.rover-mission { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; }
+.rover-mission-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.rover-mission-phase { font-weight: 700; font-size: 18px; text-transform: capitalize; }
+.rover-mission-last { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.rover-mission-buttons { display: flex; gap: 10px; }
+.rover-btn { border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.rover-btn:disabled { opacity: 0.4; cursor: default; }
+.rover-btn.go { background: var(--rover-yellow); color: #1a1405; }
+.rover-btn.stop { background: transparent; color: var(--red); border: 1px solid var(--red); }
+.rover-inspections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.rover-inspection.latest { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+@media (max-width: 900px) { .rover-inspections { grid-template-columns: 1fr; } .rover-inspection.latest { grid-template-columns: 1fr; } }
+.rover-inspection { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.rover-inspection.latest { border-color: var(--rover-yellow); }
+.rover-inspection-photo { position: relative; background: #000; }
+.rover-inspection-photo img { display: block; width: 100%; height: 100%; object-fit: cover; aspect-ratio: 16 / 9; }
+.rover-inspection-photo .noimg { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--muted); }
+.rover-photo-tag { position: absolute; left: 10px; bottom: 10px; background: rgba(0, 0, 0, 0.7); color: var(--rover-yellow); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 4px 8px; border-radius: 6px; }
+.rover-inspection-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.rover-inspection-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rover-inspection-head h3 { margin: 0; font-size: 20px; }
+.rover-sev { font-weight: 800; font-size: 12px; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 999px; border: 1px solid; }
+.rover-sev.ok { color: var(--green); }
+.rover-sev.warn { color: var(--amber); }
+.rover-sev.crit { color: var(--red); }
+.rover-sev.unk { color: var(--muted); }
+.rover-sev.run { color: var(--rover-yellow); animation: rover-blink 1s ease-in-out infinite; }
+.rover-readings { display: flex; gap: 14px; flex-wrap: wrap; font-variant-numeric: tabular-nums; font-weight: 600; }
+.rover-headline { margin: 0; font-size: 15px; line-height: 1.45; }
+.rover-concerns { margin: 0; padding-left: 18px; color: var(--red); font-size: 14px; line-height: 1.45; }
+.rover-concerns b { color: var(--ink, #fff); }
+.rover-clear { margin: 0; color: var(--green); font-size: 14px; }
+
+.rover-mission-log { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.rover-mission-log li span { font-variant-numeric: tabular-nums; opacity: 0.7; margin-right: 6px; }
+.rover-mission-log li.ai { color: var(--rover-yellow); }
+.rover-mission-row > div:first-child { flex: 1 1 320px; min-width: 0; }
