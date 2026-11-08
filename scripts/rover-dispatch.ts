@@ -922,7 +922,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
       status.last_look = { t: new Date().toLocaleTimeString(), where: `${where} (photo check)`, view: VIEW_LABEL[v.view], rack: v.rack_visible, full: v.full_rack_visible, wires: v.wires_visible, reason: v.reason, img: image.thumbnailDataUrl };
       if (v.view === "OPEN_RACK_CABLES") { log(`Photo check passed: ${v.reason}`); break; }
       log(`Photo check failed (${VIEW_LABEL[v.view]}): ${v.reason}`);
-      if (attempt === 3) { log("Sending the best photo we have; the report will say the wiring was not clearly captured."); break; }
+      if (attempt === 3 || !found) { log("Sending the best photo we have; the report will say the wiring was not clearly captured."); break; }
       log("Looking again before retaking the photo.");
       await findWiresNearby(`${where} (retake)`, true, false, 20);
       image = await photo();
@@ -949,7 +949,14 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
 
   // front
   phase("inspecting the front", rackId);
-  if (await findWiresNearby("Front", false, false)) return finish("Front", true);
+  const front = await lookAndLog("Front");
+  if (front.view === "OPEN_RACK_CABLES") return finish("Front", true);
+  if (!front.rack_visible) {
+    // Sanity check: the box must be in front of us at the start, otherwise every later move is guesswork.
+    log("I can't see the box in front of me, so I won't go looking around blind. Please point me at the box.");
+    await returnHome();
+    return;
+  }
   log("Front: no exposed wires. Checking the left side.");
   await sleep(ROUTE.pauseMs);
   const centreMark = trail.length;
@@ -982,7 +989,9 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
   phase("inspecting the right side", rackId);
   await standoff("Right side");
-  return finish("Right side", await findWiresNearby("Right side", true));
+  if (await findWiresNearby("Right side", true)) return finish("Right side", true);
+  log("Checked the front and both sides but never saw the wiring. Going home without a photo.");
+  await returnHome();
 }
 
 /** ROVER_MODE=sweep (default): drive around one box. ROVER_MODE=search: turn left/right to find among several boxes. */
