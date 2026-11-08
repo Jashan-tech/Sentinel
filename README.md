@@ -86,9 +86,9 @@ Data persists in `.spacetime/`, so you don't need to publish again on later runs
 
 ### Five-minute demo
 1. Open http://127.0.0.1:5173 in two browser windows, one normal and one private. Both should say **Connected**.
-2. Select **Rack 01** (Standard Network profile, 32 °C warning / 40 °C critical). Submit **41.5 °C**. Both windows show the reading and a **CRITICAL** alert.
+2. Select **Rack 01** and choose **Cisco UCS C220 M7** in **Server profile** (documented 35 °C critical). Submit **41.5 °C**. Both windows show the reading and a **CRITICAL** alert.
 3. Click **Run Investigation**. Both windows show *Running*. When persistence completes, both show the same report. Expand **View Investigation Details** for measured facts, AI hypotheses, verification results, missing evidence, and the agent timeline. Execution time varies.
-4. Select **Industrial Network Rack** in **Server profile** (40 °C warning / 50 °C critical). The backend applies the profile and the alert drops to **WARNING**. Run another investigation: the new report reflects the new thresholds, and the first remains under **Previous investigations**.
+4. Choose **Dell PowerEdge R760** in **Server profile** (documented 35 °C warning / 45 °C critical). The backend applies it and the alert drops to **WARNING**. Run another investigation: the new report reflects the new thresholds, and the first remains under **Previous investigations**.
 5. Leave sound or humidity unsubmitted to see *Unavailable* readings and explicit missing evidence. Ultrasonic distance is displayed only in Rover Safety/history and is excluded from equipment investigations.
 6. **Visual inspection:** click **Upload Photo**, choose a file from `agent/test-assets/vision/`, and label it **Online reference**. Supply source URL, attribution and license from `manifest.json`, then run the inspection. Expand the persisted investigation details to review image provenance, visual observations, uncertainty and any verification outcome.
 
@@ -100,7 +100,7 @@ Top navigation switches between **Rack Monitor** and the separate **Fleet Simula
 
 | Section | Purpose |
 |---|---|
-| Selection bar | Backend rack selector, fictional server simulation profile, configured limits and current threshold status. |
+| Selection bar | Backend rack selector, **Server profile** (five real servers with manufacturer-documented thresholds and a source link) and current threshold status. |
 | Live Telemetry | Three compact environmental rows: temperature, humidity and raw sound, with provenance and freshness. |
 | Live / Simulation | Read-only subscribed values or explicitly committed simulator edits; no automatic observations. |
 | Rover Safety | Collision-only distance and controller-integration qualification; no invented stop state. |
@@ -256,9 +256,9 @@ See [the full equipment-intelligence contract and source registry](agent/EQUIPME
 
 ---
 
-## Installed equipment and documented ranges
+## Server profiles (documented ranges)
 
-Each rack can be assigned the server that is actually installed in it, chosen on the Rack Monitor from five servers. Their environmental specifications were read from the manufacturers' own documentation on 2026-11-08:
+The Rack Monitor's **Server profile** dropdown offers five real servers. Their environmental specifications were read from the manufacturers' own documentation on 2026-11-08:
 
 | Server | Standard operating | Highest documented | Operating humidity | Source |
 |---|---|---|---|---|
@@ -268,14 +268,15 @@ Each rack can be assigned the server that is actually installed in it, chosen on
 | Cisco UCS C220 M7 | 10–35 °C (A2) | none above standard | 10–90% RH | [Installation and Service Guide](https://www.cisco.com/c/en/us/td/docs/unified_computing/ucs/c/hw/C220M7/install/b-c220-m7-installation-guide/m-specifications.html) |
 | Supermicro SYS-621C-TN12R | 10–35 °C (A2) | none above standard | 8–80% RH, 21 °C max dew point | [Datasheet](https://www.supermicro.com/en/products/system/datasheet/sys-621c-tn12r) |
 
-- **Reference card:** the Rack Monitor shows the assigned server's documented ranges with source, section and access date. It places the live ambient and humidity readings within, above or below those ranges. This is labelled reference only: documented limits are for server *inlet* air, and the rover measures ambient air near the rack.
-- **Opt-in thresholds:** **Use documented range as thresholds** creates a sourced profile:
+- **Selecting a server does two things in one transaction:** it records that server as installed in the rack, and it applies its documented thresholds.
+- **Thresholds:**
   - The warning is the documented standard upper limit.
   - The critical threshold is the highest documented limit.
   - For servers documented only to 35 °C (Cisco, Supermicro), 35 °C is critical and there is no invented warning tier.
   - The humidity warning is the documented operating maximum.
-  - Alerts then say "manufacturer-documented" and repeat the ambient-versus-inlet caveat. Changing the installed server drops another server's documented profile.
-- **Investigations:** investigations use the assigned server automatically. The Documentation Agent gets an exact knowledge-base match (`agent/src/fixtures/docs/equipment-docs.json`), and threshold provenance in the evidence becomes `MANUFACTURER_DOCUMENTED_RANGE`.
+- **Alerts:** they say "manufacturer-documented" and note that the rover measures ambient air, not server inlet air.
+- **Demo racks:** they start as Dell R760 (Rack 01), HPE DL360 Gen11 (Rack 02) and Lenovo SR650 V3 (Rack 03). Existing databases are migrated with `spacetime call sentinel assign_demo_servers`. The former fictional profiles remain in the database for tests and older reports.
+- **Investigations:** investigations use the selected server automatically. The Documentation Agent gets an exact knowledge-base match (`agent/src/fixtures/docs/equipment-docs.json`), and threshold provenance in the evidence becomes `MANUFACTURER_DOCUMENTED_RANGE`.
 - **Single source of truth:** `spacetimedb/src/equipmentCatalog.ts` holds the catalog. A test keeps it consistent with the agent's knowledge base.
 
 ---

@@ -7,8 +7,7 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AbandonInvestigationReducer from "../abandon_investigation_reducer";
-import ApplyDocumentedThresholdsReducer from "../apply_documented_thresholds_reducer";
-import AssignRackEquipmentReducer from "../assign_rack_equipment_reducer";
+import AssignDemoServersReducer from "../assign_demo_servers_reducer";
 import AttachInvestigationImageReducer from "../attach_investigation_image_reducer";
 import AuthorizeAgentReducer from "../authorize_agent_reducer";
 import AuthorizeBenchmarkRunnerReducer from "../authorize_benchmark_runner_reducer";
@@ -26,13 +25,13 @@ import ReportBenchmarkSampleReducer from "../report_benchmark_sample_reducer";
 import ReportBenchmarkStageReducer from "../report_benchmark_stage_reducer";
 import RequestBenchmarkRunReducer from "../request_benchmark_run_reducer";
 import RevokeAgentReducer from "../revoke_agent_reducer";
+import SelectServerProfileReducer from "../select_server_profile_reducer";
 import SetRunningTimeoutReducer from "../set_running_timeout_reducer";
 import StartInvestigationReducer from "../start_investigation_reducer";
 import StopBenchmarkRunReducer from "../stop_benchmark_run_reducer";
 
 export type AbandonInvestigationParams = __Infer<typeof AbandonInvestigationReducer>;
-export type ApplyDocumentedThresholdsParams = __Infer<typeof ApplyDocumentedThresholdsReducer>;
-export type AssignRackEquipmentParams = __Infer<typeof AssignRackEquipmentReducer>;
+export type AssignDemoServersParams = __Infer<typeof AssignDemoServersReducer>;
 export type AttachInvestigationImageParams = __Infer<typeof AttachInvestigationImageReducer>;
 export type AuthorizeAgentParams = __Infer<typeof AuthorizeAgentReducer>;
 export type AuthorizeBenchmarkRunnerParams = __Infer<typeof AuthorizeBenchmarkRunnerReducer>;
@@ -50,6 +49,7 @@ export type ReportBenchmarkSampleParams = __Infer<typeof ReportBenchmarkSampleRe
 export type ReportBenchmarkStageParams = __Infer<typeof ReportBenchmarkStageReducer>;
 export type RequestBenchmarkRunParams = __Infer<typeof RequestBenchmarkRunReducer>;
 export type RevokeAgentParams = __Infer<typeof RevokeAgentReducer>;
+export type SelectServerProfileParams = __Infer<typeof SelectServerProfileReducer>;
 export type SetRunningTimeoutParams = __Infer<typeof SetRunningTimeoutReducer>;
 export type StartInvestigationParams = __Infer<typeof StartInvestigationReducer>;
 export type StopBenchmarkRunParams = __Infer<typeof StopBenchmarkRunReducer>;

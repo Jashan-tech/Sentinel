@@ -261,12 +261,12 @@ try {
   ).toBeVisible();
   await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("41.5");
   await expect(b.getByTestId("rack-status")).toHaveClass(/critical/);
-  await a.getByLabel("Server simulation profile").selectOption("industrial");
-  await expect(b.getByLabel("Server simulation profile")).toHaveValue(
-    "industrial",
+  await a.getByLabel("Server profile").selectOption("dell-poweredge-r760");
+  await expect(b.getByLabel("Server profile")).toHaveValue(
+    "dell-poweredge-r760",
   );
   await expect(b.getByTestId("rack-status")).toHaveClass(/warning/);
-  await a.getByLabel("Server simulation profile").selectOption("compute");
+  await a.getByLabel("Server profile").selectOption("cisco-ucs-c220-m7");
   await expect(b.getByTestId("rack-status")).toHaveClass(/critical/);
   await a.getByLabel("Relative humidity", { exact: true }).fill("85");
   await a

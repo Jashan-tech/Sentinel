@@ -65,8 +65,8 @@ try {
   );
   await Promise.all([open(a), open(b)]);
 
-  // Critical telemetry on Rack 01 (Standard 32/40 C) so the combined run has something to correlate.
-  await a.getByLabel("Server simulation profile").selectOption("standard");
+  // Critical telemetry on Rack 01 (Cisco UCS C220 M7: documented critical at 35 C) so the combined run has something to correlate.
+  await a.getByLabel("Server profile").selectOption("cisco-ucs-c220-m7");
 
   await a.getByLabel("Source identifier").fill("vision-e2e-temp");
   await a.getByLabel("Ambient temperature", { exact: true }).fill("41.5");

@@ -2095,105 +2095,11 @@ footer > span {
   margin: 10px 0 0;
 }
 
-/* ---- Installed equipment (documented ranges) ---- */
-.equipment-spec {
-  margin-top: 16px;
-  padding: 22px 24px;
-}
-.equipment-spec-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.equipment-spec-head h2 {
-  font-size: 15px;
-  margin: 0;
-}
-.equipment-spec-head select {
-  min-width: 260px;
-  padding: 9px 12px;
-}
-.spec-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin: 18px 0 0;
-}
-.spec-grid div {
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-.spec-grid dt {
-  color: var(--muted);
-  font-size: 11px;
-}
-.spec-grid dd {
-  margin: 6px 0 4px;
-  font-size: 20px;
-  color: #d1e0eb;
-  font-variant-numeric: tabular-nums;
-}
-.spec-grid small,
-.spec-compare small,
-.spec-apply small,
-.spec-source {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-.spec-compare {
-  margin-top: 16px;
-  padding: 12px 14px;
-  background: var(--surface-raised);
-  border-radius: 8px;
-}
-.spec-compare p {
-  margin: 0 0 6px;
-  font-size: 13px;
-  color: #d1e0eb;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-}
-.range-pos {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-}
-.range-pos::before { margin-right: 4px; }
-.pos-within { color: var(--green); }
-.pos-within::before { content: "✓"; }
-.pos-extended, .pos-below { color: var(--amber); }
-.pos-extended::before, .pos-below::before { content: "!"; }
-.pos-above { color: var(--red); }
-.pos-above::before { content: "▲"; }
-.spec-apply {
-  margin-top: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-.spec-applied {
-  margin: 0;
-  font-size: 12px;
-  color: var(--green);
-}
-.spec-source {
-  margin: 14px 0 0;
-}
-.spec-source a { color: var(--cyan); }
+/* ---- Server profile (documented ranges) ---- */
+.profile-limits small a { color: var(--cyan); }
 .identity-assigned {
   font-size: 12px;
   color: var(--muted);
   margin: 12px 0 0;
 }
 .identity-assigned b { color: #d1e0eb; font-weight: 500; }
-@media (max-width: 760px) {
-  .spec-grid { grid-template-columns: 1fr; }
-  .equipment-spec-head select { min-width: 0; width: 100%; }
-}

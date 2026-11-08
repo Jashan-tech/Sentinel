@@ -295,3 +295,15 @@ Verification and Supervisor routing remain the largest token consumers.
 ### Mission Control collision-safety boundary
 
 Equipment investigations now use ambient temperature, relative humidity and raw sound only. The HTTP schema remains compatible with distance-bearing requests, but the API removes ultrasonic readings/alerts before inference; snapshot tools exclude distance readings, trends and missing-data indicators, and their argument schemas reject that metric. SpacetimeDB still stores distance observations for Rover Safety/history. No motion-controller stop state or collision thresholds are implemented.
+
+## Speed
+
+These changes measured live on Rack 01, the busiest demo rack:
+
+| | Before | After |
+|---|---|---|
+| Run time | 76–86 s, often INCOMPLETE | 25–30 s, COMPLETED/VERIFIED |
+
+- **Parallel specialists:** the Supervisor can list independent specialists in `also`, and the `team` node runs them in parallel. Delegation budget, duplicate and repeat guards still apply, and verification always runs separately.
+- **Shorter specialist answers:** at most 6 observations of under 35 words each, and at most 3 hypotheses. Long answers were both slow to generate and frequently malformed JSON.
+- **Local JSON repair:** common model slips are repaired with `jsonrepair` (and a "first complete object" pass), then validated by the same strict schemas, instead of a 10–20 s repair round trip to the model.

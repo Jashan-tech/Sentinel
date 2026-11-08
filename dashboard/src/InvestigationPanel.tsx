@@ -548,11 +548,11 @@ export default function InvestigationPanel(props: {
         )}
         {assigned ? (
           <p className="identity-assigned" data-testid="identity-assigned">
-            Investigations use the installed server assigned above:{" "}
+            Investigations use the server selected in Server profile:{" "}
             <b>
               {assigned.manufacturer} {assigned.model}
             </b>{" "}
-            (operator-assigned).
+            (operator-selected).
           </p>
         ) : (
         <details className="advanced-settings identity-settings">

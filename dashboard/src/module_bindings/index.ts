@@ -35,8 +35,7 @@ import {
 
 // Import all reducer arg schemas
 import AbandonInvestigationReducer from "./abandon_investigation_reducer";
-import ApplyDocumentedThresholdsReducer from "./apply_documented_thresholds_reducer";
-import AssignRackEquipmentReducer from "./assign_rack_equipment_reducer";
+import AssignDemoServersReducer from "./assign_demo_servers_reducer";
 import AttachInvestigationImageReducer from "./attach_investigation_image_reducer";
 import AuthorizeAgentReducer from "./authorize_agent_reducer";
 import AuthorizeBenchmarkRunnerReducer from "./authorize_benchmark_runner_reducer";
@@ -54,6 +53,7 @@ import ReportBenchmarkSampleReducer from "./report_benchmark_sample_reducer";
 import ReportBenchmarkStageReducer from "./report_benchmark_stage_reducer";
 import RequestBenchmarkRunReducer from "./request_benchmark_run_reducer";
 import RevokeAgentReducer from "./revoke_agent_reducer";
+import SelectServerProfileReducer from "./select_server_profile_reducer";
 import SetRunningTimeoutReducer from "./set_running_timeout_reducer";
 import StartInvestigationReducer from "./start_investigation_reducer";
 import StopBenchmarkRunReducer from "./stop_benchmark_run_reducer";
@@ -305,8 +305,7 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("abandon_investigation", AbandonInvestigationReducer),
-  __reducerSchema("apply_documented_thresholds", ApplyDocumentedThresholdsReducer),
-  __reducerSchema("assign_rack_equipment", AssignRackEquipmentReducer),
+  __reducerSchema("assign_demo_servers", AssignDemoServersReducer),
   __reducerSchema("attach_investigation_image", AttachInvestigationImageReducer),
   __reducerSchema("authorize_agent", AuthorizeAgentReducer),
   __reducerSchema("authorize_benchmark_runner", AuthorizeBenchmarkRunnerReducer),
@@ -324,6 +323,7 @@ const reducersSchema = __reducers(
   __reducerSchema("report_benchmark_stage", ReportBenchmarkStageReducer),
   __reducerSchema("request_benchmark_run", RequestBenchmarkRunReducer),
   __reducerSchema("revoke_agent", RevokeAgentReducer),
+  __reducerSchema("select_server_profile", SelectServerProfileReducer),
   __reducerSchema("set_running_timeout", SetRunningTimeoutReducer),
   __reducerSchema("start_investigation", StartInvestigationReducer),
   __reducerSchema("stop_benchmark_run", StopBenchmarkRunReducer),

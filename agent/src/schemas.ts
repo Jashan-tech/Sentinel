@@ -346,12 +346,17 @@ export const SupervisorDecision = z.object({
   next: z.enum([...AgentName.options, "finish"]),
   objective: cappedOptText(600),
   reason: cappedOptText(600),
+  /** Independent specialists to run IN PARALLEL with `next` (speed). Ignored unless `next` is a data specialist. */
+  also: z
+    .array(z.object({ agent: z.enum(["telemetry", "environment", "documentation"]), objective: cappedOptText(600) }))
+    .nullish()
+    .transform((v) => (v ?? []).slice(0, 2)),
 });
 export type SupervisorDecision = z.infer<typeof SupervisorDecision>;
 
 /** What a specialist model writes. */
 export const SpecialistOutput = z.object({
-  observations: capped(z.string(), 20),
+  observations: capped(z.string(), 8),
   hypotheses: capped(Hypothesis, 6),
   missing_information: capped(z.string(), 30),
   recommended_next_action: cappedOptText(600),

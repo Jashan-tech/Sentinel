@@ -33,8 +33,8 @@ async function connected(p: Page) {
   await p.locator(".simulation-editor .advanced-settings > summary").click();
 }
 async function applyProfile(p: Page, profileId: string) {
-  await p.getByLabel("Server simulation profile").selectOption(profileId);
-  await expect(p.getByLabel("Server simulation profile")).toHaveValue(
+  await p.getByLabel("Server profile").selectOption(profileId);
+  await expect(p.getByLabel("Server profile")).toHaveValue(
     profileId,
   );
 }
@@ -98,7 +98,7 @@ try {
   );
 
   // 2-3. Critical simulated temperature on Rack 01 under the Standard profile (32/40 C) -> CRITICAL alert.
-  await applyProfile(a, "standard");
+  await applyProfile(a, "cisco-ucs-c220-m7"); // documented critical at 35 °C
   await a.getByLabel("Source identifier").fill("e2e-temp-01");
   await submit(a, "Ambient temperature", "41.5");
   await submit(a, "Relative humidity", "45");
@@ -176,7 +176,7 @@ try {
     `Specialist findings (${rep1.specialist_findings.length}) and verification (grounded=${rep1.verification.grounded}) displayed`,
   );
   expect(row1.status).toBe(status1);
-  expect(row1.profile_name).toBe("Standard Network Rack");
+  expect(row1.profile_name).toBe("Cisco UCS C220 M7 · documented range");
   expect(row1.telemetry_simulated).toBe(true);
   expect(ev1.length).toBeGreaterThan(5);
   log(
@@ -206,8 +206,8 @@ try {
     "Session B shows the same investigation (status, severity, summary) via subscription",
   );
 
-  // 11-12. Change profile to Industrial (40/50 C): 41.5 C is now WARNING; new investigation reflects it.
-  await applyProfile(a, "industrial");
+  // 11-12. Change server to Dell PowerEdge R760 (documented 35 warning / 45 critical): 41.5 C is now WARNING.
+  await applyProfile(a, "dell-poweredge-r760");
   await expect(b.locator(".alert-item")).toContainText("WARNING");
   const id2 = await runInvestigation(a, known);
   const rec2 = await waitDone(a, id2);
@@ -219,7 +219,7 @@ try {
     "11-12",
     `Profile -> ${row2.profile_name}: status ${row2.status}, severity ${row2.severity}; agents ${rep2.agents_invoked.map((x: any) => x.agent).join(" -> ")}`,
   );
-  expect(row2.profile_name).toBe("Industrial Network Rack");
+  expect(row2.profile_name).toBe("Dell PowerEdge R760 · documented range");
   expect(row2.severity).toBe("WARNING");
   await expect(rec2).toHaveAttribute("data-severity", "WARNING");
   expect(

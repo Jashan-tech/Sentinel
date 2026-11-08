@@ -209,26 +209,25 @@ async function investigationTrustChecks(agent: DbConnection, browser: DbConnecti
     asAdmin("revoke_agent", agent.identity!.toHexString());
   }
 }
-/** Installed-equipment assignment and opt-in documented thresholds on the real backend (rack-1). */
+/** Server profiles from documented ranges on the real backend (rack-1). */
 async function equipmentChecks(a: DbConnection, b: DbConnection, args: (v: number) => any) {
   const alertMsg = async () => (await sql("SELECT * FROM rack_alert WHERE alert_id = 'rack-1:AMBIENT_TEMPERATURE_C'"))[0];
   const rackProfile = async () => (await sql("SELECT profile_id FROM rack WHERE rack_id = 'rack-1'"))[0].profile_id;
   try {
-    await rejects(a.reducers.assignRackEquipment({ rackId: "rack-1", modelId: "dell-poweredge-r9999" }), /Unknown server model/);
-    await rejects(a.reducers.applyDocumentedThresholds({ rackId: "rack-1" }), /Assign the installed server first/);
-    check("only catalog servers can be assigned; documented thresholds need an assigned server", () => {});
-    await a.reducers.assignRackEquipment({ rackId: "rack-1", modelId: "cisco-ucs-c220-m7" });
-    await a.reducers.applyDocumentedThresholds({ rackId: "rack-1" });
+    await rejects(a.reducers.selectServerProfile({ rackId: "rack-1", modelId: "dell-poweredge-r9999" }), /Unknown server/);
+    check("only documented servers can be selected", () => {});
+    await a.reducers.selectServerProfile({ rackId: "rack-1", modelId: "cisco-ucs-c220-m7" });
     const [src] = await sql("SELECT * FROM rack_profile_source WHERE profile_id = 'doc-cisco-ucs-c220-m7'");
     const [prof] = await sql("SELECT * FROM rack_profile WHERE profile_id = 'doc-cisco-ucs-c220-m7'");
-    check("applying documented thresholds creates a sourced profile and assigns it to the rack", () => {
+    const [eq] = await sql("SELECT * FROM rack_equipment WHERE rack_id = 'rack-1'");
+    const profileNow = await rackProfile();
+    check("selecting a server applies its sourced profile and records the installed model in one step", () => {
+      assert.equal(profileNow, "doc-cisco-ucs-c220-m7");
+      assert.equal(eq.model_id, "cisco-ucs-c220-m7");
       assert.equal(src.doc_id, "CISCO-C220-M7-ENV");
       assert.match(src.source_url, /^https:\/\/www\.cisco\.com\//);
-      assert.equal(prof.temperature_warning_c, 35);
-      assert.equal(prof.temperature_critical_c, 35);
-      assert.equal(prof.humidity_warning_percent, 90);
+      assert.deepEqual([prof.temperature_warning_c, prof.temperature_critical_c, prof.humidity_warning_percent], [35, 35, 90]);
     });
-    assert.equal(await rackProfile(), "doc-cisco-ucs-c220-m7");
     await a.reducers.ingestSimulatedObservation(args(36));
     await new Promise((r) => setTimeout(r, 300));
     const al = await alertMsg();
@@ -238,11 +237,15 @@ async function equipmentChecks(a: DbConnection, b: DbConnection, args: (v: numbe
     });
     await rejects(a.reducers.changeRackProfile({ rackId: "rack-3", profileId: "doc-cisco-ucs-c220-m7" }), /that server assigned/);
     check("a documented profile cannot be applied to a rack without that server", () => {});
-    await a.reducers.assignRackEquipment({ rackId: "rack-1", modelId: "dell-poweredge-r760" });
-    const after = await rackProfile();
-    check("changing the installed server drops the other server's documented thresholds", () => assert.equal(after, "standard"));
+    await a.reducers.selectServerProfile({ rackId: "rack-1", modelId: "dell-poweredge-r760" });
+    await new Promise((r) => setTimeout(r, 300));
+    const al2 = await alertMsg();
+    const p2 = await rackProfile();
+    check("switching servers re-evaluates alerts against the new documented range", () => {
+      assert.equal(p2, "doc-dell-poweredge-r760");
+      assert.equal(al2.severity, "WARNING");
+    });
   } finally {
-    await a.reducers.assignRackEquipment({ rackId: "rack-1", modelId: "" }).catch(() => {});
     await a.reducers.changeRackProfile({ rackId: "rack-1", profileId: "standard" }).catch(() => {});
   }
 }
@@ -257,9 +260,11 @@ try {
   check("independent authenticated identities", () =>
     assert.notEqual(a.identity?.toHexString(), b.identity?.toHexString()),
   );
-  check("three profiles and racks", () => {
+  check("three racks; three demo profiles plus at most five documented server profiles", () => {
     assert.equal(a.db.rack.count(), 3n);
-    assert.equal(a.db.rackProfile.count(), 3n);
+    const all = [...a.db.rackProfile.iter()];
+    assert.equal(all.filter((p) => !p.profileId.startsWith("doc-")).length, 3);
+    assert.ok(all.filter((p) => p.profileId.startsWith("doc-")).length <= 5);
   });
   check("missing measurements stay missing on untouched rack", () =>
     assert.equal(
@@ -388,11 +393,12 @@ try {
   check("profile changes synchronize and reevaluate existing values", () =>
     assert.equal(alert()?.severity, "WARNING"),
   );
+  const profilesBefore = a.db.rackProfile.count();
   await a.reducers.initializeDemo({});
   check("idempotent seed preserves selected settings and readings", () => {
     assert.equal(a.db.rack.rackId.find("rack-1")?.profileId, "industrial");
     assert.equal(a.db.rack.count(), 3n);
-    assert.equal(a.db.rackProfile.count(), 3n);
+    assert.equal(a.db.rackProfile.count(), profilesBefore);
     assert.equal(
       a.db.currentTelemetry.currentKey.find("rack-1:AMBIENT_TEMPERATURE_C")
         ?.numericValue,

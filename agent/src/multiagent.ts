@@ -101,8 +101,10 @@ const SENSOR_RULES = `Facts about the data:
 
 const FINDINGS_FORMAT = `When you are done, reply with ONLY this JSON object (no markdown, no prose):
 {"observations": string[], "hypotheses": [{"description": string, "supporting_evidence": string[], "contradicting_evidence": string[], "missing_evidence": string[]}], "missing_information": string[], "recommended_next_action": string}
+Keep it SHORT: at most 6 observations (one distinct fact each, under 35 words; merge related facts), at most
+3 hypotheses with at most 3 evidence items per list, at most 4 missing_information items.
 Each observation must quote the value, unit, metric, source_identifier, observed_at, and say SIMULATED or REAL.
-Hypotheses are possibilities, not confirmed faults. No confidence percentages. Be concise.
+Hypotheses are possibilities, not confirmed faults. No confidence percentages.
 Report only what YOUR tools returned for YOUR objective. Do not copy other agents' observations or hypotheses;
 refer to them only to agree or disagree with specific evidence.`;
 
@@ -208,7 +210,10 @@ Routing rules:
 - Finish when more delegation would not change the conclusion, or when the budget is nearly used.
 
 Reply with ONLY this JSON object:
-{"plan": string (REQUIRED on your first decision: 1-3 sentences; omit later), "next": "telemetry"|"environment"|"documentation"|"verification"|"finish", "objective": string (the specific task for that agent; empty when finishing), "reason": string (one short sentence)}`;
+{"plan": string (REQUIRED on your first decision: 1-3 sentences; omit later), "next": "telemetry"|"environment"|"documentation"|"verification"|"finish", "objective": string (the specific task for that agent; empty when finishing), "reason": string (one short sentence), "also": [{"agent": "telemetry"|"environment"|"documentation", "objective": string}] (optional)}
+Speed: specialists whose tasks do not depend on each other's results (for example telemetry and documentation) should
+run together: put one in next/objective and up to two others in "also"; they run in parallel. Use "also" only for
+telemetry/environment/documentation, never for vision or verification.`;
 
 const FINAL_PROMPT = `Write the final diagnostic report from the team's findings above.
 Reply with ONLY this JSON object:
@@ -831,7 +836,7 @@ export async function runMultiAgentInvestigation(
         agent: "supervisor",
       });
       return {
-        decision: { plan: undefined, next: "finish", objective: "", reason },
+        decision: { plan: undefined, also: [], next: "finish", objective: "", reason },
         limitsReached: limits,
       };
     };
@@ -1054,6 +1059,24 @@ Decide the next step.`;
     }
     // Required verification before finishing is enforced by the deterministic verification gate.
 
+    // Parallel companions: only alongside a data specialist, never duplicating an agent or an earlier
+    // identical task, and only within the remaining delegation budget (keeping verification's slot).
+    let also: { agent: "telemetry" | "environment" | "documentation"; objective: string }[] = [];
+    if (next === "telemetry" || next === "environment" || next === "documentation") {
+      const reserve = requiresVerification && state.verificationRuns === 0 ? 1 : 0;
+      const room = opts.maxDelegations - state.delegations - 1 - reserve;
+      const seenAgents = new Set<string>([next]);
+      for (const a of decision.also ?? []) {
+        if (also.length >= room) break;
+        if (seenAgents.has(a.agent) || !a.objective) continue;
+        if (state.assignments.some((x) => x.agent === a.agent && norm(x.objective) === norm(a.objective))) continue;
+        seenAgents.add(a.agent);
+        also.push({ agent: a.agent, objective: a.objective });
+      }
+      if ((decision.also?.length ?? 0) > also.length)
+        emit("GUARD", `Ran ${also.length} of ${decision.also!.length} requested parallel task(s) (budget, duplicates or repeats)`, "INFO", { agent: "supervisor" });
+    }
+
     if (next === "finish") {
       emit("SUPERVISOR", `Decided to finish: ${decision.reason}`, "INFO", {
         agent: "supervisor",
@@ -1065,56 +1088,63 @@ Decide the next step.`;
         "INFO",
         { agent: "supervisor" },
       );
+      for (const a of also)
+        emit("SUPERVISOR", `Delegated to ${a.agent} (in parallel): ${a.objective}`, "INFO", { agent: "supervisor" });
     }
-    return { ...update, decision: { ...decision, next, objective } };
+    return { ...update, decision: { ...decision, next, objective, also } };
   }
 
   // ---- Specialists ----
+  /** One specialist run (shared by the single and parallel paths). Does not touch state. */
+  async function runSpecialist(agent: Exclude<AgentName, "verification" | "vision">, objective: string, state: S) {
+    emit("AGENT", `${agent} agent started: ${objective}`, "INFO", { agent });
+    const prior = state.findings.length
+      ? `\nFindings from other agents (use as context, verify with your tools):\n${findingsDigest(state.findings, null)}`
+      : "";
+    const res = await runAgent(agent, `${rackHeader}\nYour objective from the Supervisor: ${objective}${prior}`, SpecialistOutput);
+    const finding: SpecialistFinding = {
+      agent,
+      objective,
+      observations: res.output?.observations ?? [],
+      hypotheses: res.output?.hypotheses ?? [],
+      missing_information:
+        res.output?.missing_information ?? (res.problem ? [`${agent} agent produced no valid findings`] : []),
+      recommended_next_action: res.output?.recommended_next_action ?? "",
+      tools_executed: res.records,
+      status: res.output ? res.status : res.status === "COMPLETED" ? "INCOMPLETE" : res.status,
+    };
+    emit(
+      "AGENT",
+      `${agent} agent ${finding.status.toLowerCase()}: ${finding.observations.length} observation(s), ${finding.hypotheses.length} hypothesis(es), ${res.records.length} tool call(s)`,
+      finding.status === "COMPLETED" ? "SUCCESS" : "ERROR",
+      { agent },
+    );
+    return finding;
+  }
+
   const specialistNode =
-    (agent: Exclude<AgentName, "verification">) =>
+    (agent: Exclude<AgentName, "verification" | "vision">) =>
     async (state: S): Promise<Partial<S>> => {
-      const objective =
-        state.decision?.objective || `Investigate rack ${request.rack_id}`;
-      emit("AGENT", `${agent} agent started: ${objective}`, "INFO", { agent });
-      const prior = state.findings.length
-        ? `\nFindings from other agents (use as context, verify with your tools):\n${findingsDigest(state.findings, null)}`
-        : "";
-      const res = await runAgent(
-        agent,
-        `${rackHeader}\nYour objective from the Supervisor: ${objective}${prior}`,
-        SpecialistOutput,
-      );
-      const finding: SpecialistFinding = {
-        agent,
-        objective,
-        observations: res.output?.observations ?? [],
-        hypotheses: res.output?.hypotheses ?? [],
-        missing_information:
-          res.output?.missing_information ??
-          (res.problem ? [`${agent} agent produced no valid findings`] : []),
-        recommended_next_action: res.output?.recommended_next_action ?? "",
-        tools_executed: res.records,
-        status: res.output
-          ? res.status
-          : res.status === "COMPLETED"
-            ? "INCOMPLETE"
-            : res.status,
-      };
-      emit(
-        "AGENT",
-        `${agent} agent ${finding.status.toLowerCase()}: ${finding.observations.length} observation(s), ${finding.hypotheses.length} hypothesis(es), ${res.records.length} tool call(s)`,
-        finding.status === "COMPLETED" ? "SUCCESS" : "ERROR",
-        { agent },
-      );
+      const objective = state.decision?.objective || `Investigate rack ${request.rack_id}`;
+      const finding = await runSpecialist(agent, objective, state);
       return {
         findings: [...state.findings, finding],
-        assignments: [
-          ...state.assignments,
-          { agent, objective, status: finding.status },
-        ],
+        assignments: [...state.assignments, { agent, objective, status: finding.status }],
         delegations: state.delegations + 1,
       };
     };
+
+  /** Independent specialists chosen together by the Supervisor run concurrently (each counts as a delegation). */
+  async function teamNode(state: S): Promise<Partial<S>> {
+    const d = state.decision!;
+    const tasks = [{ agent: d.next as Exclude<AgentName, "verification" | "vision">, objective: d.objective || `Investigate rack ${request.rack_id}` }, ...d.also];
+    const findings = await Promise.all(tasks.map((t) => runSpecialist(t.agent, t.objective, state)));
+    return {
+      findings: [...state.findings, ...findings],
+      assignments: [...state.assignments, ...findings.map((f) => ({ agent: f.agent, objective: f.objective, status: f.status }))],
+      delegations: state.delegations + tasks.length,
+    };
+  }
 
   // ---- Vision ----
   async function visionNode(state: S): Promise<Partial<S>> {
@@ -1252,7 +1282,7 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
   }
 
   // ---- Deterministic verification gate (every path to the final report passes here) ----
-  const FINISH: SupervisorDecision = { plan: undefined, next: "finish", objective: "", reason: "verification gate" };
+  const FINISH: SupervisorDecision = { plan: undefined, also: [], next: "finish", objective: "", reason: "verification gate" };
   async function verificationGate(state: S): Promise<Partial<S>> {
     const pending = unverified(state);
     if (!requiresVerification || pending.length === 0) return { decision: FINISH };
@@ -1272,7 +1302,7 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
     emit("GUARD", `${mandatory ? "Mandatory visual verification" : "Verification required"}: ${pending.length} finding(s) from ${who} not yet verified; routing to verification before the report`, "INFO", { agent: "supervisor" });
     return {
       decision: {
-        plan: undefined,
+        plan: undefined, also: [],
         next: "verification",
         objective: "Independently check all findings (including any visual observations) against the data and the photograph before the report is written.",
         reason: "verification gate",
@@ -1493,19 +1523,23 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
       ? "final"
       : !state.decision || state.decision.next === "finish"
         ? "gate"
-        : state.decision.next;
+        : state.decision.also?.length
+          ? "team"
+          : state.decision.next;
 
   const graph = new StateGraph(State)
     .addNode("supervisor", supervisor)
     .addNode("telemetry", specialistNode("telemetry"))
     .addNode("environment", specialistNode("environment"))
     .addNode("documentation", specialistNode("documentation"))
+    .addNode("team", teamNode)
     .addNode("vision", visionNode)
     .addNode("verification", verificationNode)
     .addNode("gate", verificationGate)
     .addNode("final", finalNode)
     .addEdge(START, "supervisor")
     .addConditionalEdges("supervisor", route, [
+      "team",
       "telemetry",
       "environment",
       "documentation",
@@ -1518,6 +1552,7 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
       "verification",
       "final",
     ])
+    .addEdge("team", "supervisor")
     .addEdge("telemetry", "supervisor")
     .addEdge("environment", "supervisor")
     .addEdge("documentation", "supervisor")

@@ -6,8 +6,7 @@ import type { Rack } from "./module_bindings/types";
 import { metrics, date } from "./telemetry";
 import { evaluate, validateObservation } from "../../spacetimedb/src/rules";
 import InvestigationPanel from "./InvestigationPanel";
-import EquipmentSpec from "./EquipmentSpec";
-import { catalogEntry } from "../../spacetimedb/src/equipmentCatalog";
+import { EQUIPMENT_CATALOG, catalogEntry } from "../../spacetimedb/src/equipmentCatalog";
 import Icon, { type IconName } from "./Icon";
 
 export default function RackView({
@@ -50,11 +49,6 @@ export default function RackView({
   const profile = profiles.find((p) => p.profileId === rack.profileId);
   const assigned = catalogEntry(equipmentRows[0]?.modelId ?? "");
   const profileSource = profileSources.find((p) => p.profileId === rack.profileId);
-  // Documented-range profiles only make sense on a rack with that server installed.
-  const selectableProfiles = profiles.filter((p) => {
-    const src = profileSources.find((x) => x.profileId === p.profileId);
-    return !src || src.modelId === assigned?.modelId;
-  });
   const ready =
     online && currentReady && historyReady && alertsReady && profilesReady;
   const environmental = metrics.slice(0, 3);
@@ -409,41 +403,56 @@ export default function RackView({
         {rackSelection}
         <label className="server-select">
           <span>
-            Server profile <small>simulation configuration</small>
+            Server profile <small>manufacturer-documented range</small>
           </span>
           <select
-            aria-label="Server simulation profile"
-            value={rack.profileId}
+            aria-label="Server profile"
+            value={profileSource ? profileSource.modelId : ""}
             disabled={!ready || pending || hasPhysical}
             onChange={(e) => {
-              const profileId = e.target.value;
-              void commit((db) =>
-                db.reducers.changeRackProfile({
-                  rackId: rack.rackId,
-                  profileId,
-                }),
-              );
+              const modelId = e.target.value;
+              if (modelId)
+                void commit((db) =>
+                  db.reducers.selectServerProfile({ rackId: rack.rackId, modelId }),
+                );
             }}
           >
-            {selectableProfiles.map((p) => (
-              <option key={p.profileId} value={p.profileId}>
-                {p.name}
+            {!profileSource && (
+              <option value="" disabled>
+                {profile ? `${profile.name} (legacy demo) — choose a server` : "Choose a server"}
+              </option>
+            )}
+            {EQUIPMENT_CATALOG.map((e) => (
+              <option key={e.modelId} value={e.modelId}>
+                {e.manufacturer} {e.model}
               </option>
             ))}
           </select>
         </label>
-        <div className="profile-limits">
+        <div className="profile-limits" data-testid="profile-limits">
           <span>{profileSource ? "Documented thresholds" : "Demo thresholds"}</span>
           <p>
-            <b>{profile?.temperatureWarningC ?? "—"}°</b> warning <span>/</span>{" "}
+            {profile && profile.temperatureWarningC < profile.temperatureCriticalC && (
+              <>
+                <b>{profile.temperatureWarningC}°</b> warning <span>/</span>{" "}
+              </>
+            )}
             <b>{profile?.temperatureCriticalC ?? "—"}°</b> critical{" "}
             <span>·</span> <b>{profile?.humidityWarningPercent ?? "—"}%RH</b>{" "}
             warning
           </p>
           <small>
-            {profileSource
-              ? "From the manufacturer's documented inlet range · applied by the operator"
-              : "Fictional settings · not manufacturer specifications or installed identity"}
+            {assigned && profileSource ? (
+              <>
+                Normal {assigned.standardTemperatureC.min}–{assigned.standardTemperatureC.max} °C ·{" "}
+                <a href={assigned.source.url} target="_blank" rel="noreferrer noopener" title={profileSource.mapping}>
+                  {assigned.manufacturer} documentation
+                </a>{" "}
+                · inlet range; rover reads ambient air
+              </>
+            ) : (
+              "Fictional settings · not manufacturer specifications"
+            )}
           </small>
         </div>
         <div className={`rack-status ${level}`} data-testid="rack-status">
@@ -454,15 +463,6 @@ export default function RackView({
           </div>
         </div>
       </section>
-      <EquipmentSpec
-        rackId={rack.rackId}
-        entry={assigned}
-        profile={profile}
-        profileSource={profileSource}
-        current={current}
-        disabled={!ready || pending}
-        commit={commit}
-      />
       <InvestigationPanel
         rack={rack}
         profile={profile}

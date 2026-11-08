@@ -1,3 +1,4 @@
+import { jsonrepair } from "jsonrepair";
 import { Annotation, END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import {
   AIMessage,
@@ -97,9 +98,46 @@ export function textOf(msg: BaseMessage): string {
 export function extractJson(text: string): unknown {
   const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, "");
   const start = cleaned.indexOf("{");
+  if (start === -1) throw new Error("No JSON object found in model output");
   const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end <= start) throw new Error("No JSON object found in model output");
-  return JSON.parse(cleaned.slice(start, end + 1));
+  const body = end > start ? cleaned.slice(start, end + 1) : cleaned.slice(start);
+  try {
+    return JSON.parse(body);
+  } catch (err) {
+    // Two objects back to back ("{...}{...}" or "{...}\n{...}"): use the first complete one.
+    const first = firstBalancedObject(cleaned, start);
+    if (first) {
+      try {
+        return JSON.parse(first);
+      } catch {
+        // fall through to local repair
+      }
+    }
+    // Common model slips (a missing comma, a trailing comma, an unescaped quote, a cut-off tail) are
+    // repaired locally instead of costing another 10-20 s model round trip. The repaired object still
+    // goes through the same strict schema validation, so nothing unvalidated gets through.
+    try {
+      return JSON.parse(jsonrepair(cleaned.slice(start)));
+    } catch {
+      throw err;
+    }
+  }
+}
+
+/** The first brace-balanced {...} starting at `start`, respecting strings; null if unbalanced. */
+function firstBalancedObject(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
 }
 
 export function errMsg(err: unknown): string {

@@ -58,9 +58,9 @@ try {
   await a.getByRole("button", { name: "Simulation", exact: true }).click();
   await a.locator(".simulation-editor .advanced-settings > summary").click();
   await b.locator(".observation-details > summary").click();
-  await a.getByLabel("Server simulation profile").selectOption("standard");
-  await expect(b.getByLabel("Server simulation profile")).toHaveValue(
-    "standard",
+  await a.getByLabel("Server profile").selectOption("cisco-ucs-c220-m7");
+  await expect(b.getByLabel("Server profile")).toHaveValue(
+    "cisco-ucs-c220-m7",
   );
   // Establish a repeatable baseline even after another suite left humidity high.
   await a.getByLabel("Relative humidity", { exact: true }).fill("45");
@@ -82,9 +82,9 @@ try {
     "Ambient temperature",
   );
   await expect(b.locator(".history tbody")).toContainText("dashboard-demo");
-  await a.getByLabel("Server simulation profile").selectOption("industrial");
-  await expect(b.getByLabel("Server simulation profile")).toHaveValue(
-    "industrial",
+  await a.getByLabel("Server profile").selectOption("dell-poweredge-r760");
+  await expect(b.getByLabel("Server profile")).toHaveValue(
+    "dell-poweredge-r760",
   );
   await expect(b.locator(".alert-item.warning")).toContainText(
     "Ambient temperature",
