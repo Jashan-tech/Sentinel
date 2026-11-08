@@ -18,6 +18,7 @@ export interface ObservationRow {
   unit: string;
   sourceType: string;
   sourceIdentifier: string;
+  observationId?: bigint;
   observedAt: Ts;
   ingestedAt: Ts;
 }
@@ -34,7 +35,15 @@ export interface SnapshotInput {
   };
   current: readonly ObservationRow[];
   recent: readonly ObservationRow[];
-  alerts: readonly { alertId: string; rackId: string; metricType: string; severity: string; message: string; active: boolean; createdAt: Ts }[];
+  alerts: readonly {
+    alertId: string;
+    rackId: string;
+    metricType: string;
+    severity: string;
+    message: string;
+    active: boolean;
+    createdAt: Ts;
+  }[];
   asOf: Date;
   staleAfterSeconds: number;
 }
@@ -43,7 +52,8 @@ export interface SnapshotInput {
 
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 4096;
-export type ImageSourceType = "MANUAL_UPLOAD" | "ONLINE_REFERENCE" | "ROVER_CAMERA";
+export type ImageSourceType =
+  "MANUAL_UPLOAD" | "ONLINE_REFERENCE" | "ROVER_CAMERA";
 export type InspectionMode = "TELEMETRY" | "VISUAL" | "COMBINED";
 
 /** A validated image ready to send. base64 is sent to the agent only; it is never stored. */
@@ -65,19 +75,27 @@ export interface ImageAttachment {
 }
 
 /** Real file signature, independent of the file name or declared type. */
-export function sniffImageType(b: Uint8Array): "image/jpeg" | "image/png" | null {
-  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+export function sniffImageType(
+  b: Uint8Array,
+): "image/jpeg" | "image/png" | null {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)
+    return "image/jpeg";
   const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (b.length >= 8 && png.every((v, i) => b[i] === v)) return "image/png";
   return null;
 }
 
-export const toIso = (t: Ts) => new Date(Number(t.microsSinceUnixEpoch / 1000n)).toISOString();
+export const toIso = (t: Ts) =>
+  new Date(Number(t.microsSinceUnixEpoch / 1000n)).toISOString();
 
-const supported = (m: string) => (SUPPORTED_METRICS as readonly string[]).includes(m);
+const supported = (m: string) =>
+  (SUPPORTED_METRICS as readonly string[]).includes(m);
 
 function reading(r: ObservationRow) {
   return {
+    ...(r.observationId !== undefined
+      ? { observation_id: r.observationId.toString() }
+      : {}),
     metric_type: r.metricType,
     numeric_value: r.numericValue,
     unit: r.unit, // actual unit stored in SpacetimeDB (e.g. "°C", "%RH")
@@ -91,24 +109,47 @@ function reading(r: ObservationRow) {
 
 /** Build the agent's InvestigationRequest from one rack's subscribed rows. Missing readings stay missing.
  *  VISUAL mode sends no telemetry at all (the operator chose not to combine it). */
-export function buildInvestigationRequest(s: SnapshotInput, opts: { mode?: InspectionMode; image?: ImageAttachment } = {}) {
+export interface EquipmentIdentity {
+  manufacturer: string;
+  model: string;
+  provenance: "OPERATOR_PROVIDED";
+  assertion: string;
+}
+export function buildInvestigationRequest(
+  s: SnapshotInput,
+  opts: {
+    mode?: InspectionMode;
+    image?: ImageAttachment;
+    equipmentIdentity?: EquipmentIdentity;
+  } = {},
+) {
   const visualOnly = opts.mode === "VISUAL";
-  const mine = <T extends { rackId: string }>(rows: readonly T[]) => (visualOnly ? [] : rows.filter((r) => r.rackId === s.rack.rackId));
+  const mine = <T extends { rackId: string }>(rows: readonly T[]) =>
+    visualOnly ? [] : rows.filter((r) => r.rackId === s.rack.rackId);
   const image = opts.image;
   return {
     rack_id: s.rack.rackId,
     rack_name: s.rack.displayName,
     equipment_type: s.profile.equipmentType,
+    ...(opts.equipmentIdentity
+      ? { equipment_identity: opts.equipmentIdentity }
+      : {}),
     profile: {
       name: s.profile.name,
       temperature_warning_c: s.profile.temperatureWarningC,
       temperature_critical_c: s.profile.temperatureCriticalC,
       humidity_warning_percent: s.profile.humidityWarningPercent,
     },
-    current_telemetry: mine(s.current).filter((r) => supported(r.metricType)).map(reading),
+    current_telemetry: mine(s.current)
+      .filter((r) => supported(r.metricType))
+      .map(reading),
     recent_telemetry: mine(s.recent)
       .filter((r) => supported(r.metricType))
-      .sort((a, b) => (a.observedAt.microsSinceUnixEpoch < b.observedAt.microsSinceUnixEpoch ? -1 : 1))
+      .sort((a, b) =>
+        a.observedAt.microsSinceUnixEpoch < b.observedAt.microsSinceUnixEpoch
+          ? -1
+          : 1,
+      )
       .map(reading),
     active_alerts: mine(s.alerts)
       .filter((a) => a.active)
@@ -143,11 +184,18 @@ export function buildInvestigationRequest(s: SnapshotInput, opts: { mode?: Inspe
 }
 
 /** The persisted snapshot: identical to the request but with image bytes replaced by the hash. */
-export function snapshotForStorage(req: ReturnType<typeof buildInvestigationRequest>, image?: ImageAttachment) {
+export function snapshotForStorage(
+  req: ReturnType<typeof buildInvestigationRequest>,
+  image?: ImageAttachment,
+) {
   if (!("images" in req) || !req.images) return req;
   return {
     ...req,
-    images: req.images.map(({ data_base64: _bytes, ...rest }) => ({ ...rest, sha256: image?.sha256 ?? null, byte_size: image?.byteSize ?? null })),
+    images: req.images.map(({ data_base64: _bytes, ...rest }) => ({
+      ...rest,
+      sha256: image?.sha256 ?? null,
+      byte_size: image?.byteSize ?? null,
+    })),
   };
 }
 
@@ -170,9 +218,21 @@ export interface AgentReport {
   severity: string;
   summary: string;
   investigation_status: string;
-  hypotheses: { description: string; supporting_evidence: string[]; contradicting_evidence: string[]; missing_evidence: string[] }[];
+  hypotheses: {
+    description: string;
+    supporting_evidence: string[];
+    contradicting_evidence: string[];
+    missing_evidence: string[];
+  }[];
   recommended_next_inspection: string[];
-  tool_calls: { agent?: string; round: number; tool: string; args: Record<string, unknown>; status: string; result_summary: string }[];
+  tool_calls: {
+    agent?: string;
+    round: number;
+    tool: string;
+    args: Record<string, unknown>;
+    status: string;
+    result_summary: string;
+  }[];
   model: string;
   supervisor_plan: string;
   agents_invoked: { agent: string; objective: string; status: string }[];
@@ -203,6 +263,10 @@ export interface AgentReport {
     history: Record<string, unknown>[];
     configured_thresholds: Record<string, unknown> | null;
     documentation: Record<string, unknown>[];
+    trends?: Record<string, unknown>[];
+    early_warning_indicators?: Record<string, unknown>[];
+    equipment_identity?: EquipmentIdentity | null;
+    documentation_match?: Record<string, unknown> | null;
   };
   limits_reached: string[];
   inspection_mode?: InspectionMode;
@@ -225,19 +289,49 @@ export interface VisualFindingView {
 const arr = (v: unknown) => Array.isArray(v);
 
 /** Structural check of the multi-agent /investigate response. Throws with a readable reason. */
-export function validateInvestigationResponse(body: unknown, rackId: string, expectImage = false): { report: AgentReport; events: AgentEvent[] } {
+export function validateInvestigationResponse(
+  body: unknown,
+  rackId: string,
+  expectImage = false,
+): { report: AgentReport; events: AgentEvent[] } {
   const b = body as { report?: Record<string, unknown>; events?: unknown };
   const r = b?.report;
-  if (!r || typeof r !== "object") throw new Error("Agent response has no report");
-  if (r.rack_id !== rackId) throw new Error(`Report is for ${String(r.rack_id)}, not ${rackId}`);
-  if (!STATUSES.includes(r.investigation_status as string)) throw new Error("Report has an invalid investigation_status");
-  if (!SEVERITIES.includes(r.severity as string)) throw new Error("Report has an invalid severity");
+  if (!r || typeof r !== "object")
+    throw new Error("Agent response has no report");
+  if (r.rack_id !== rackId)
+    throw new Error(`Report is for ${String(r.rack_id)}, not ${rackId}`);
+  if (!STATUSES.includes(r.investigation_status as string))
+    throw new Error("Report has an invalid investigation_status");
+  if (!SEVERITIES.includes(r.severity as string))
+    throw new Error("Report has an invalid severity");
   if (typeof r.summary !== "string") throw new Error("Report has no summary");
-  for (const k of ["hypotheses", "recommended_next_inspection", "tool_calls", "agents_invoked", "specialist_findings", "verified_findings", "missing_information", "limits_reached"])
-    if (!arr(r[k])) throw new Error(`Report field ${k} is missing (is the agent running in multi-agent mode?)`);
-  if (!r.evidence || typeof r.evidence !== "object") throw new Error("Report has no evidence");
-  if (expectImage && !arr(r.visual_findings)) throw new Error("Report has no visual_findings although an image was sent");
-  if (!arr(b.events) || !(b.events as AgentEvent[]).every((e) => typeof e?.type === "string" && typeof e?.description === "string"))
+  for (const k of [
+    "hypotheses",
+    "recommended_next_inspection",
+    "tool_calls",
+    "agents_invoked",
+    "specialist_findings",
+    "verified_findings",
+    "missing_information",
+    "limits_reached",
+  ])
+    if (!arr(r[k]))
+      throw new Error(
+        `Report field ${k} is missing (is the agent running in multi-agent mode?)`,
+      );
+  if (!r.evidence || typeof r.evidence !== "object")
+    throw new Error("Report has no evidence");
+  if (expectImage && !arr(r.visual_findings))
+    throw new Error("Report has no visual_findings although an image was sent");
+  if (
+    !arr(b.events) ||
+    !(b.events as AgentEvent[]).every(
+      (e) => typeof e?.type === "string" && typeof e?.description === "string",
+    )
+  )
     throw new Error("Agent response has an invalid event timeline");
-  return { report: r as unknown as AgentReport, events: b.events as AgentEvent[] };
+  return {
+    report: r as unknown as AgentReport,
+    events: b.events as AgentEvent[],
+  };
 }

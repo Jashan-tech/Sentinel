@@ -1,5 +1,5 @@
 {
-  "_note": "Local reference set for the Documentation Agent. Each entry states its provenance. No manufacturer manuals are loaded; manufacturer-specific limits are explicitly UNAVAILABLE.",
+  "_note": "Concise source-grounded reference facts accessed 2026-11-07. Manufacturer records require exact explicit rack identity; generic profiles and online photographs do not identify installed equipment. No manuals are reproduced.",
   "documents": [
     {
       "doc_id": "SENTINEL-DEMO-PROFILES",
@@ -27,7 +27,7 @@
       "availability": "UNAVAILABLE",
       "applies_to": ["Compute"],
       "topics": ["temperature", "humidity", "acoustic", "general"],
-      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+      "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
     },
     {
       "doc_id": "MFR-SPEC-NETWORK",
@@ -37,7 +37,7 @@
       "availability": "UNAVAILABLE",
       "applies_to": ["Network"],
       "topics": ["temperature", "humidity", "acoustic", "general"],
-      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+      "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
     },
     {
       "doc_id": "MFR-SPEC-STORAGE",
@@ -47,7 +47,147 @@
       "availability": "UNAVAILABLE",
       "applies_to": ["Storage"],
       "topics": ["temperature", "humidity", "acoustic", "general"],
-      "content": "No manufacturer documentation has been loaded for this equipment. The make and model of the installed hardware are not known to SENTINEL, so manufacturer operating limits are unavailable."
+      "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
+    },
+    {
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-07",
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "These contextual references do not replace configured demonstration thresholds or prove a fault."
+      ],
+      "doc_id": "CISCO-C9300-LED",
+      "manufacturer": "Cisco",
+      "equipment_family": "Catalyst 9300",
+      "supported_models": ["C9300-24T", "C9300-48T", "C9300-24P", "C9300-48P"],
+      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide ? Product Overview",
+      "source_url": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Product-overview.html",
+      "revision_date": "2026-05-15",
+      "revision": "Updated May 15, 2026",
+      "section": "LEDs / System LED, Table 8",
+      "applies_to": ["Network"],
+      "topics": ["led", "general"],
+      "technical_facts": [
+        {
+          "fact_id": "C9300-SYSTEM-GREEN",
+          "statement": "A steady green System LED denotes normal system operation; blinking green denotes software loading."
+        },
+        {
+          "fact_id": "C9300-SYSTEM-AMBER",
+          "statement": "An amber System LED denotes powered but improper operation; the table names fan failure or POST failure as possible reasons."
+        }
+      ],
+      "limitations": [
+        "Requires identifying the System LED, its temporal state, exact installed model, and operating mode. A static photograph cannot establish blinking.",
+        "This does not apply to an arbitrary port LED or confirm the selected rack has a fan or POST failure."
+      ]
+    },
+    {
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-07",
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "These contextual references do not replace configured demonstration thresholds or prove a fault."
+      ],
+      "doc_id": "CISCO-C9300-AIRFLOW",
+      "manufacturer": "Cisco",
+      "equipment_family": "Catalyst 9300",
+      "supported_models": ["C9300-24T", "C9300-48T", "C9300-24P", "C9300-48P"],
+      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide ? Preparing for Installation",
+      "source_url": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Preparing-for-installation.html",
+      "revision_date": "2026-05-15",
+      "revision": "Updated May 15, 2026",
+      "section": "Installation Guidelines; Site Requirements / Air Flow",
+      "applies_to": ["Network"],
+      "topics": ["airflow", "temperature", "general"],
+      "technical_facts": [
+        {
+          "fact_id": "C9300-AIRFLOW",
+          "statement": "Keep ventilation openings unobstructed and avoid feeding another device exhaust into the switch intake."
+        },
+        {
+          "fact_id": "C9300-CLEARANCE",
+          "statement": "The Air Flow section recommends 15 cm between a wall and chassis or PSU intakes/exhausts, and 30.5 cm between one chassis intake and another chassis exhaust in adjacent racks."
+        }
+      ],
+      "limitations": [
+        "Clearance is a site-layout recommendation, not a conclusion obtainable from one rover distance reading.",
+        "Rover ambient readings do not establish inlet temperature, airflow, or installation compliance."
+      ]
+    },
+    {
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-07",
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "These contextual references do not replace configured demonstration thresholds or prove a fault."
+      ],
+      "doc_id": "DELL-R7425-ENV",
+      "manufacturer": "Dell",
+      "equipment_family": "PowerEdge",
+      "supported_models": ["PowerEdge R7425"],
+      "title": "Dell EMC PowerEdge R7425 ? Technical specifications",
+      "source_url": "https://dl.dell.com/topicspdf/poweredge-r7425_reference-guide2_en-us.pdf",
+      "revision_date": "2019-12",
+      "revision": "Rev. A09",
+      "section": "Environmental specifications, pp. 11?12, Tables 8, 9, 13, 14",
+      "applies_to": ["Compute"],
+      "topics": ["temperature", "humidity", "general"],
+      "technical_facts": [
+        {
+          "fact_id": "R7425-STANDARD-TEMP",
+          "statement": "Standard continuous operation is 10?35 ?C below 950 m altitude, with no direct sunlight. Maximum supported temperature is reduced at higher altitude; configuration restrictions and expanded operation are separate."
+        },
+        {
+          "fact_id": "R7425-OPERATING-HUMIDITY",
+          "statement": "Operating relative humidity is 10?80% with a maximum dew point of 29 ?C."
+        }
+      ],
+      "limitations": [
+        "Do not apply standard limits without checking altitude and the actual server configuration.",
+        "A rover ambient reading is not a verified server inlet measurement; humidity alone does not establish dew point or condensation. No compliance verdict is supported."
+      ]
+    },
+    {
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-07",
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "These contextual references do not replace configured demonstration thresholds or prove a fault."
+      ],
+      "doc_id": "HPE-DL380-G11-ENV",
+      "manufacturer": "HPE",
+      "equipment_family": "ProLiant",
+      "supported_models": ["ProLiant DL380 Gen11"],
+      "title": "HPE ProLiant DL380 Gen11 QuickSpecs",
+      "source_url": "https://www.hpe.com/psnow/downloadDoc/HPE%20ProLiant%20DL380%20Gen11%20QuickSpecs-a50004307enw.pdf?contentDisposition=attachment&deepLink=&form=false&hf=regular&id=a50004307enw.pdf&isFutureVersion=true&isLinearized=false&originalObjectName=&prelaunchSection=&preview=false&print=&r=&section=&softrollSection=&utm_campaign=&utm_content=&utm_medium=&utm_source=&utm_term=&ver=49",
+      "revision_date": "2026-11-02",
+      "revision": "a50004307enw, Version 49",
+      "section": "Technical Specifications, pp. 79?80 / Relative Humidity; System Inlet Temperature",
+      "applies_to": ["Compute"],
+      "topics": ["temperature", "humidity", "general"],
+      "technical_facts": [
+        {
+          "fact_id": "DL380-G11-INLET",
+          "statement": "Standard inlet operation is 10?35 ?C at sea level, derated by 1 ?C per 305 m to 3050 m; installed options may lower the upper limit or permitted rate of change."
+        },
+        {
+          "fact_id": "DL380-G11-HUMIDITY",
+          "statement": "Operating relative humidity is 8?90%, non-condensing, with a 28 ?C maximum wet-bulb temperature."
+        }
+      ],
+      "limitations": [
+        "Check the installed options and approved configuration before applying limits; extended operation is not assumed.",
+        "A rover ambient reading does not establish system inlet temperature, wet-bulb temperature, or condensation. No automatic manufacturer-compliance assessment."
+      ]
     }
   ]
 }

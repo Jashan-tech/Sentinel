@@ -24,8 +24,15 @@ export function fakeModel(steps: Step[]) {
   return { model, calls };
 }
 
-export const toolCall = (name: string, args: Record<string, unknown>, id = `c_${Math.random().toString(36).slice(2)}`) =>
-  new AIMessage({ content: "", tool_calls: [{ name, args, id, type: "tool_call" }] });
+export const toolCall = (
+  name: string,
+  args: Record<string, unknown>,
+  id = `c_${Math.random().toString(36).slice(2)}`,
+) =>
+  new AIMessage({
+    content: "",
+    tool_calls: [{ name, args, id, type: "tool_call" }],
+  });
 
 export const done = () => new AIMessage("Enough evidence.");
 
@@ -33,7 +40,8 @@ export const reportJson = (severity = "CRITICAL") =>
   new AIMessage(
     JSON.stringify({
       severity,
-      summary: "Ambient temperature 35.4 C exceeds the configured critical threshold of 33 C.",
+      summary:
+        "Ambient temperature 35.4 C exceeds the configured critical threshold of 33 C.",
       hypotheses: [
         {
           description: "Insufficient cooling airflow to the rack.",
@@ -63,6 +71,22 @@ export const testConfig: AgentConfig = {
 };
 
 export const fixture = (name: string) =>
-  InvestigationRequest.parse(JSON.parse(readFileSync(new URL(`../src/fixtures/${name}.json`, import.meta.url), "utf8")));
+  InvestigationRequest.parse(
+    JSON.parse(
+      readFileSync(
+        new URL(`../src/fixtures/${name}.json`, import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
 export const rawFixture = (name: string) =>
-  JSON.parse(readFileSync(new URL(`../src/fixtures/${name}.json`, import.meta.url), "utf8"));
+  JSON.parse(
+    readFileSync(
+      new URL(`../src/fixtures/${name}.json`, import.meta.url),
+      "utf8",
+    ),
+  );
+
+/** Structured model response for deterministic HTTP/browser test harnesses. */
+export const jsonMessage = (value: unknown) =>
+  new AIMessage(JSON.stringify(value));
