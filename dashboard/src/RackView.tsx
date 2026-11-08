@@ -54,7 +54,10 @@ export default function RackView({
   );
   const stale = (at: { microsSinceUnixEpoch: bigint }) =>
     now - Number(at.microsSinceUnixEpoch / 1000n) > freshness * 1000;
-  const hasPhysical = current.some((r) => r.sourceType !== "SIMULATOR");
+  const hasPhysical = current.some(
+    (r) =>
+      r.metricType !== "ULTRASONIC_DISTANCE_CM" && r.sourceType !== "SIMULATOR",
+  );
   const level = !online
     ? "unknown"
     : active.some((a) => a.severity === "CRITICAL")
@@ -110,7 +113,7 @@ export default function RackView({
         key={m.id}
         onSubmit={(e) => {
           e.preventDefault();
-          if (!editable || drafts[m.id] === undefined || !value.trim()) return;
+          if (!editable || !value.trim()) return;
           const args = {
             rackId: rack.rackId,
             metricType: m.id,
@@ -172,12 +175,7 @@ export default function RackView({
           />
           <button
             disabled={
-              !ready ||
-              pending ||
-              !editable ||
-              drafts[m.id] === undefined ||
-              !value.trim() ||
-              !source.trim()
+              !ready || pending || !editable || !value.trim() || !source.trim()
             }
             aria-label={`Apply ${m.label}`}
           >

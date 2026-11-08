@@ -20,7 +20,8 @@
     "db:verify:publish": "node scripts/spacetime.mjs publish sentinel-verification --module-path spacetimedb --server http://127.0.0.1:3000 --yes --no-config",
     "test:agent-e2e": "tsx scripts/agent-e2e.ts",
     "test:vision-e2e": "tsx scripts/vision-e2e.ts",
-    "test:equipment-e2e": "tsx scripts/equipment-e2e.ts"
+    "test:equipment-e2e": "tsx scripts/equipment-e2e.ts",
+    "test:mission-control": "tsx scripts/mission-control-e2e.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

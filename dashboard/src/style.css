@@ -1882,3 +1882,15 @@ footer > span {
     scroll-behavior: auto !important;
   }
 }
+.main-finding .inv-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.summary-hint {
+  color: var(--muted);
+  font-size: 10px;
+  margin: 0 0 24px;
+}

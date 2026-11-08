@@ -245,3 +245,7 @@ The Supervisor picks the sequence each time, so it can differ between runs.
 - The curated manufacturer records require an exact explicit operator identity. They are conditional references, not automatic compliance checks; other models/topics return NO_MATCH.
 - A multi-agent investigation takes about 12–45 s and returns everything in one response; nothing is streamed.
 - `nvidia/nemotron-3-super-120b-a12b` and `nemotron-nano-3-30b-a3b` return 404 for our key.
+
+### Mission Control collision-safety boundary
+
+Equipment investigations now use ambient temperature, relative humidity and raw sound only. The HTTP schema remains compatible with distance-bearing requests, but the API removes ultrasonic readings/alerts before inference; snapshot tools exclude distance readings, trends and missing-data indicators, and their argument schemas reject that metric. SpacetimeDB still stores distance observations for Rover Safety/history. No motion-controller stop state or collision thresholds are implemented.

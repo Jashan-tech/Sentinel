@@ -682,11 +682,25 @@ export default function InvestigationPanel(props: {
                     evidence before acting.
                   </p>
                 )}
+                {report?.specialist_findings?.some(
+                  (f) => f.status !== "COMPLETED",
+                ) && (
+                  <p
+                    className="inv-warning"
+                    data-testid="partial-agent-warning"
+                  >
+                    Some agents did not complete. Review their status and
+                    missing evidence before acting.
+                  </p>
+                )}
                 <div className="main-finding">
                   <span className="eyebrow">Main finding</span>
                   <p className="inv-summary">
                     {report?.summary ||
                       "The saved record has no readable summary."}
+                  </p>
+                  <p className="summary-hint">
+                    Full summary and evidence in investigation details.
                   </p>
                 </div>
                 <div className="recommended-action">
@@ -772,7 +786,9 @@ export default function InvestigationPanel(props: {
         <div className="investigation-footer">
           <Icon name="check" size={14} />
           <span>
-            Persisted in SpacetimeDB · Shared across connected sessions
+            {shown
+              ? "Persisted in SpacetimeDB · Shared across connected sessions"
+              : "Reports are saved and synchronized through SpacetimeDB"}
           </span>
         </div>
       </section>
@@ -788,7 +804,10 @@ function reviewPassed(report: Partial<AgentReport> | null) {
       v.grounded &&
       !v.unsupported_claims?.length &&
       !v.contradictions?.length &&
-      !v.request_more_investigation,
+      !v.request_more_investigation &&
+      !(report?.specialist_findings ?? []).some(
+        (f) => f.status !== "COMPLETED",
+      ),
   );
 }
 function verificationLabel(report: Partial<AgentReport> | null) {
@@ -799,6 +818,8 @@ function verificationLabel(report: Partial<AgentReport> | null) {
   if (!v.grounded || v.unsupported_claims?.length || v.contradictions?.length)
     return "Review concerns";
   if (v.request_more_investigation) return "Follow-up requested";
+  if (report?.specialist_findings?.some((f) => f.status !== "COMPLETED"))
+    return "Review limited · partial evidence";
   return "AI review passed";
 }
 function ReportDetails({
@@ -954,14 +975,7 @@ function ReportDetails({
           <div className="inv-grid">
             <div>
               <h3 className="inv-h">
-                Verification outcome{" "}
-                <small>
-                  {report.verification
-                    ? reviewPassed(report)
-                      ? "findings grounded"
-                      : "grounding problems found"
-                    : "not run"}
-                </small>
+                Verification outcome <small>{verificationLabel(report)}</small>
               </h3>
               <ul className="inv-list">
                 {(reviewPassed(report)

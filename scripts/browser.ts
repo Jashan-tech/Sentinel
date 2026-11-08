@@ -33,10 +33,10 @@ try {
   );
   // The production demo starts empty; rack 3 stays untouched by integration tests.
   for (const p of pages) {
-    await expect(
-      p.getByRole("navigation", { name: "Rack selector" }).getByRole("button"),
-    ).toHaveCount(3);
-    await p.getByRole("button", { name: /Rack 03/ }).click();
+    await expect(p.getByLabel("Rack selector").locator("option")).toHaveCount(
+      3,
+    );
+    await p.getByLabel("Rack selector").selectOption("rack-3");
     await expect(p.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
       "Unavailable",
     );
@@ -55,15 +55,24 @@ try {
       ).toBeVisible(),
     ),
   );
-  await a.getByLabel("Selected rack profile").selectOption("standard");
-  if (await a.getByRole("button", { name: "Apply profile" }).isEnabled())
-    await a.getByRole("button", { name: "Apply profile" }).click();
-  await expect(b.getByLabel("Selected rack profile")).toHaveValue("standard");
+  await a.getByRole("button", { name: "Simulation", exact: true }).click();
+  await a.locator(".simulation-editor .advanced-settings > summary").click();
+  await b.locator(".observation-details > summary").click();
+  await a.getByLabel("Server simulation profile").selectOption("standard");
+  await expect(b.getByLabel("Server simulation profile")).toHaveValue(
+    "standard",
+  );
+  // Establish a repeatable baseline even after another suite left humidity high.
+  await a.getByLabel("Relative humidity", { exact: true }).fill("45");
+  await a
+    .getByRole("button", { name: "Apply Relative humidity", exact: true })
+    .click();
+  await expect(b.getByTestId("RELATIVE_HUMIDITY_PERCENT")).toContainText("45");
   await a.getByLabel("Ambient temperature", { exact: true }).fill("41");
   await a
     .locator("form")
     .filter({ has: a.getByLabel("Ambient temperature", { exact: true }) })
-    .getByRole("button", { name: "Submit" })
+    .getByRole("button", { name: /^Apply / })
     .click();
   await expect(
     a.getByRole("status").filter({ hasText: "Committed by SpacetimeDB" }),
@@ -73,9 +82,10 @@ try {
     "Ambient temperature",
   );
   await expect(b.locator(".history tbody")).toContainText("dashboard-demo");
-  await a.getByLabel("Selected rack profile").selectOption("industrial");
-  await a.getByRole("button", { name: "Apply profile" }).click();
-  await expect(b.getByLabel("Selected rack profile")).toHaveValue("industrial");
+  await a.getByLabel("Server simulation profile").selectOption("industrial");
+  await expect(b.getByLabel("Server simulation profile")).toHaveValue(
+    "industrial",
+  );
   await expect(b.locator(".alert-item.warning")).toContainText(
     "Ambient temperature",
   );
@@ -83,18 +93,18 @@ try {
   await a
     .locator("form")
     .filter({ has: a.getByLabel("Ambient temperature", { exact: true }) })
-    .getByRole("button", { name: "Submit" })
+    .getByRole("button", { name: /^Apply / })
     .click();
   await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("20");
   await expect(b.locator(".alert-item")).toHaveCount(0);
   await b.reload();
   await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("20");
   for (let i = 0; i < 4; i++) {
-    await b.getByRole("button", { name: /Rack 02/ }).click();
+    await b.getByLabel("Rack selector").selectOption("rack-2");
     await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
       "Unavailable",
     );
-    await b.getByRole("button", { name: /Rack 01/ }).click();
+    await b.getByLabel("Rack selector").selectOption("rack-1");
     await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("20");
   }
   await a.screenshot({
@@ -111,15 +121,11 @@ try {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBeTruthy();
-  // Local freshness timer must mark old data stale without fetching readings.
-  await a.getByLabel("Observation time").fill("2026-01-01T12:00:00");
-  await a.getByLabel("Ultrasonic distance", { exact: true }).fill("42");
-  await a
-    .locator("form")
-    .filter({ has: a.getByLabel("Ultrasonic distance", { exact: true }) })
-    .getByRole("button", { name: "Submit" })
-    .click();
-  await expect(b.getByTestId("ULTRASONIC_DISTANCE_CM")).toContainText("Stale");
+  // Local age display updates without polling or replacing a newer observation.
+  await b.clock.install();
+  await b.clock.setSystemTime(new Date(Date.now() + 61000));
+  await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("Stale");
+  await b.clock.setSystemTime(new Date());
   // Switch online state to exercise disconnected display and disable writes.
   await contexts[1].setOffline(true);
   await b.evaluate(() =>
@@ -131,10 +137,7 @@ try {
     b.getByRole("status").filter({ hasText: /Disconnected|Error/ }),
   ).toBeVisible({ timeout: 15000 });
   await expect(
-    b
-      .locator("form")
-      .filter({ has: b.getByLabel("Ambient temperature", { exact: true }) })
-      .getByRole("button", { name: "Submit" }),
+    b.locator(".investigation-actions .primary-button"),
   ).toBeDisabled();
   await contexts[1].setOffline(false);
   await expect(
