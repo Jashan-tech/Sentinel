@@ -90,7 +90,7 @@ function Tile(props: { icon: "temperature" | "humidity" | "sound"; label: string
   );
 }
 
-interface LastLook { t: string; where: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string }
+interface LastLook { t: string; where: string; view?: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string }
 interface DispatchStatus {
   last_look?: LastLook | null;
   armed: boolean;
@@ -230,8 +230,9 @@ export function LastLookCard({ look }: { look?: LastLook | null }) {
         <div className="last-look-chips">
           {chip(look.rack, "Server rack")}
           {chip(look.full, "Full rack in frame")}
-          {chip(look.wires, "Wires visible")}
+          {chip(look.wires, "Exposed cabling (target)")}
         </div>
+        {look.view && <div className="last-look-view">{look.view}</div>}
         <p>{look.reason}</p>
       </div>
     </div>

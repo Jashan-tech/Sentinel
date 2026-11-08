@@ -2965,3 +2965,5 @@ html {
 .look-chip.no { color: var(--red); }
 .last-look-body p { margin: 0; font-size: 13px; color: var(--ink-soft, #ccc); }
 @media (max-width: 600px) { .last-look { flex-direction: column; } .last-look img, .last-look-noimg { width: 100%; max-width: none; } .last-look-body { padding: 0 12px 10px; } }
+
+.last-look-view { font-size: 13px; font-weight: 700; color: var(--rover-yellow); margin-bottom: 2px; text-transform: capitalize; }

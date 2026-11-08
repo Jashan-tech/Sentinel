@@ -58,7 +58,7 @@ const AGENT_URL = env("AGENT_URL", `http://127.0.0.1:${env("PORT", "3001")}`).re
 const SENSOR_SAMPLES = 3;
 const STALE_AFTER_SECONDS = Number(env("STALE_AFTER_MINUTES", "15")) * 60;
 const COOLDOWN_MS = 60_000;
-const APPROACH_CM = Number(env("ROVER_APPROACH_CM", "15")); // stop this far from the box (front tip)
+const APPROACH_CM = Number(env("ROVER_APPROACH_CM", "30")); // stop this far from the box (front tip)
 const APPROACH_SPEED = Number(env("ROVER_APPROACH_SPEED", "30"));
 const APPROACH_MAX_MS = Number(env("ROVER_APPROACH_MAX_MS", "4000")); // never drive blind longer than this
 const BACKUP_MS = Number(env("ROVER_BACKUP_MS", "700"));
@@ -76,7 +76,9 @@ const TRIGGERS = {
   sound_min: Number(env("TRIGGER_SOUND_MIN", "250")), // sudden sound must exceed this...
   sound_factor: Number(env("TRIGGER_SOUND_FACTOR", "3")), // ...and this many times the 30 s background median
 };
-const MAX_REPOSITION = Number(env("ROVER_MAX_REPOSITION", "2"));
+// Search turns (turn in place). SCAN_TURN_MS is roughly one box over; calibrate on the floor.
+const SCAN_TURN_MS = Number(env("ROVER_SCAN_TURN_MS", "400"));
+const SCAN_SCALES: number[] = JSON.parse(env("ROVER_SCAN_SCALES", "[1, 1.8]"));
 type PatrolStep = { rack: string } | { turn: "left" | "right"; ms?: number } | { forward: number } | { back: number };
 // Hard-coded "move left for a better angle" maneuver (the rover cannot strafe). Calibrate on the floor.
 const LEFT_MOVE: PatrolStep[] = JSON.parse(
@@ -102,7 +104,7 @@ const status = {
   armed: env("ROVER_AUTO_CHECKS", "off") === "on", // off at start so the rover never moves unexpectedly
   last_trigger: null as string | null,
   /** The last frame the rover's AI looked at, with its verdict (shown on the dashboard). */
-  last_look: null as null | { t: string; where: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string },
+  last_look: null as null | { t: string; where: string; view: string; rack: boolean; full: boolean; wires: boolean; reason: string; img: string },
   running: false,
   phase: "idle",
   rack: null as string | null,
@@ -433,13 +435,22 @@ async function patrol(db: DbConnection) {
 }
 
 // ---------------- quick look (Nemotron VL, thinking off, ~2 s) ----------------
-interface Look { rack_visible: boolean; full_rack_visible: boolean; wires_visible: boolean; reason: string }
+type View = "OPEN_RACK_CABLES" | "CLOSED_DOOR_RACK" | "BLANK_PANEL" | "NO_RACK";
+interface Look { view: View; rack_visible: boolean; full_rack_visible: boolean; wires_visible: boolean; reason: string }
+const VIEW_LABEL: Record<View, string> = {
+  OPEN_RACK_CABLES: "open rack with exposed cabling (TARGET)",
+  CLOSED_DOOR_RACK: "rack behind a closed mesh door",
+  BLANK_PANEL: "blank rack panel",
+  NO_RACK: "no rack",
+};
 const LOOK_PROMPT =
-  "You are the eyes of a data-center inspection rover. Look at this camera frame and answer ONLY with JSON: " +
-  '{"rack_visible": bool, "full_rack_visible": bool, "wires_visible": bool, "reason": string}. ' +
-  "rack_visible: a server rack or rack-mounted equipment is in view (a printed photo of a rack counts). " +
-  "full_rack_visible: the whole rack face fits in the frame and is not badly cut off. " +
-  "wires_visible: network or power cables / wiring are visible on that rack (ignore ceiling or room wiring). " +
+  "You are the eyes of a data-center inspection rover. Classify this camera frame and answer ONLY with JSON: " +
+  '{"view": "OPEN_RACK_CABLES" | "CLOSED_DOOR_RACK" | "BLANK_PANEL" | "NO_RACK", "full_rack_visible": bool, "reason": string}. ' +
+  "OPEN_RACK_CABLES: the open rear of a server rack with rack-mounted equipment and network/power cables directly visible (no door). " +
+  "CLOSED_DOOR_RACK: a server rack whose equipment is seen through a closed perforated/mesh front door. " +
+  "BLANK_PANEL: a plain solid rack side panel or solid door with no equipment or cables visible. " +
+  "NO_RACK: no server rack in view. A printed photo of a rack counts as that rack. " +
+  "full_rack_visible: the rack fills most of the frame and is not badly cut off. " +
   "reason: one short plain-English sentence explaining what you see.";
 async function look(): Promise<Look> {
   if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing in agent/.env");
@@ -462,28 +473,30 @@ async function look(): Promise<Look> {
   const text = body.choices?.[0]?.message?.content ?? "";
   const m = text.match(/\{[\s\S]*\}/);
   if (!r.ok || !m) throw new Error(`vision check failed (HTTP ${r.status})`);
-  const j = JSON.parse(m[0]) as Partial<Look>;
+  const j = JSON.parse(m[0]) as { view?: string; full_rack_visible?: boolean; reason?: string };
+  const view: View = (["OPEN_RACK_CABLES", "CLOSED_DOOR_RACK", "BLANK_PANEL", "NO_RACK"] as const).find((v) => v === j.view) ?? "NO_RACK";
   return {
-    rack_visible: j.rack_visible === true,
-    full_rack_visible: j.full_rack_visible === true,
-    wires_visible: j.wires_visible === true,
+    view,
+    rack_visible: view !== "NO_RACK",
+    full_rack_visible: view !== "NO_RACK" && j.full_rack_visible === true,
+    wires_visible: view === "OPEN_RACK_CABLES",
     reason: String(j.reason ?? "").slice(0, 300),
   };
 }
-const yn = (b: boolean) => (b ? "yes" : "no");
 async function lookAndLog(where: string) {
   phase(`looking (${where})`);
   const l = await look();
   status.last_look = {
     t: new Date().toLocaleTimeString(),
     where,
+    view: VIEW_LABEL[l.view],
     rack: l.rack_visible,
     full: l.full_rack_visible,
     wires: l.wires_visible,
     reason: l.reason,
     img: await roverThumb(), // small copy of the exact frame the AI judged
   };
-  log(`AI sees [${where}]: rack ${yn(l.rack_visible)}, full rack ${yn(l.full_rack_visible)}, wires ${yn(l.wires_visible)}. ${l.reason}`);
+  log(`AI sees [${where}]: ${VIEW_LABEL[l.view]}${l.rack_visible ? (l.full_rack_visible ? ", full rack in frame" : ", rack cut off") : ""}. ${l.reason}`);
   return l;
 }
 
@@ -497,15 +510,55 @@ async function runMoves(steps: PatrolStep[]) {
   }
 }
 
-/** Look first; approach only a visible rack; photograph it only when the full rack AND wires are in view.
- *  No wires on this face -> hard-coded move left for a better angle, then look again. */
+/** Undo the most recent move (used to come back to center during the search). */
+async function undoLast() {
+  const st = trail.pop();
+  if (!st) return;
+  if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
+  else if ("back" in st) await drive(APPROACH_SPEED, st.back);
+  else if ("turn" in st) {
+    const sp = st.turn === "right" ? -TURN_SPEED : TURN_SPEED;
+    await driveLR(sp, -sp, st.ms ?? TURN_MS);
+  }
+}
+
+/** Search pattern: look ahead; then left, back to center, right, back to center; then the same wider. */
+async function findTarget(rackId: string): Promise<Look | null> {
+  let l = await lookAndLog("ahead");
+  if (l.view === "OPEN_RACK_CABLES") return l;
+  if (!DRIVE) return null;
+  for (const scale of SCAN_SCALES) {
+    for (const side of ["left", "right"] as const) {
+      checkAbort();
+      const ms = Math.round(SCAN_TURN_MS * scale);
+      log(`Not the target here (${VIEW_LABEL[l.view]}). Turning ${side} to search.`);
+      phase(`searching ${side}`, rackId);
+      await turn(side, ms);
+      await sleep(500);
+      l = await lookAndLog(`${side}${scale > 1 ? " (wider)" : ""}`);
+      if (l.view === "OPEN_RACK_CABLES") return l;
+      log(`Coming back to center.`);
+      phase("back to center", rackId);
+      await undoLast();
+      await sleep(400);
+    }
+  }
+  return null;
+}
+
+/** Find the open rack with exposed cabling, drive up to it, photograph it, record readings, return, run the AI.
+ *  Closed-door racks, blank panels and empty views are never photographed. */
 async function smartInspect(db: DbConnection, rackId: string, why: string) {
   log(`SMART INSPECT ${rackId}: ${why}`);
-  // Always drive up to whatever is in front (ultrasonic stop), then look and decide.
-  let l: Look;
+  const found = await findTarget(rackId);
+  if (!found) {
+    log("AI decision: the open rack with exposed cabling was not found in the search, so no photo was taken.");
+    return;
+  }
+  log("Target found: open rack with exposed cabling. Driving up to it.");
+  let l = found;
   if (DRIVE) {
     phase("driving to rack", rackId);
-    log("Driving forward until something is ahead (distance sensor)...");
     await approach();
     checkAbort();
     await sleep(600);
@@ -517,31 +570,12 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
       await sleep(500);
       l = await lookAndLog("backed up");
     }
-    if (!l.rack_visible) {
-      log("AI decision: no server rack here, so no photo.");
-      return;
-    }
-  } else {
-    l = await lookAndLog("start");
   }
-  let tries = 0;
-  while (l.rack_visible && l.full_rack_visible && !l.wires_visible && tries < MAX_REPOSITION && DRIVE) {
-    tries++;
-    log(`No wires visible on this side of the rack; moving left for a better angle (attempt ${tries}/${MAX_REPOSITION}).`);
-    phase("moving left for a better angle", rackId);
-    await runMoves(LEFT_MOVE);
-    await sleep(500);
-    l = await lookAndLog(`left ${tries}`);
-  }
-  if (!l.rack_visible || !l.full_rack_visible) {
-    log("Full rack not in view, so no photo was taken.");
+  if (l.view !== "OPEN_RACK_CABLES") {
+    log(`Up close this is ${VIEW_LABEL[l.view]}, not the target, so no photo was taken.`);
     return;
   }
-  if (!l.wires_visible) {
-    log("Still no wires visible after repositioning, so no photo was taken.");
-    return;
-  }
-  log("Full rack with wiring in view: taking the inspection photo.");
+  log("Full open rack with cabling in view: taking the inspection photo.");
   phase("taking photo", rackId);
   const image = await photo();
   log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB${image.thumbnailDataUrl ? "" : " (no preview)"}`);
