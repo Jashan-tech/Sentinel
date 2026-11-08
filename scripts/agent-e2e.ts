@@ -106,8 +106,8 @@ try {
   expect(rep1.verification).not.toBeNull();
   await expect(recA).toContainText("Measured facts");
   await expect(recA).toContainText("AI hypotheses");
-  await expect(recA).toContainText(/Verification\s+(findings grounded|grounding problems found)/);
-  log("7", `Specialist findings (${rep1.specialist_findings.length}) and verification (grounded=${rep1.verification.grounded}) displayed`);
+  await expect(recA).toContainText(/Verification\s+(Verified|Not grounded|Verification incomplete|Verification failed|Required verification did not run)/);
+  log("7", `Specialist findings (${rep1.specialist_findings.length}) and verification (${rep1.verification_outcome}, grounded=${rep1.verification.grounded}) displayed`);
   expect(row1.status).toBe(status1);
   expect(row1.profile_name).toBe("Standard Network Rack");
   expect(row1.telemetry_simulated).toBe(true);
