@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type ReactNode } from "react";
-import { useRover } from "./RoverLive";
+import { SendRoverBar, useRover } from "./RoverLive";
 import { Timestamp } from "spacetimedb";
 import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { DbConnection, tables } from "./module_bindings";
@@ -482,6 +482,7 @@ export default function RackView({
       {readings}
       <div className="console-grid">
         <div className="console-main">
+          <SendRoverBar rackId={rack.rackId} />
           <InvestigationPanel
             rack={rack}
             profile={profile}

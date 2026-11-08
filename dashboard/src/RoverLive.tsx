@@ -164,6 +164,54 @@ function MissionControl() {
   );
 }
 
+/** Rack Monitor: send the rover to this rack and show what it is doing / seeing. */
+export function SendRoverBar({ rackId }: { rackId: string }) {
+  const [st, setSt] = useState<DispatchStatus | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${DISPATCH}/status`, { cache: "no-store", signal: AbortSignal.timeout(2000) });
+        const d = (await r.json()) as DispatchStatus;
+        if (alive) { setSt(d); setErr(""); }
+      } catch {
+        if (alive) setErr("Rover dispatcher not running");
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 700);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+  const send = async () => {
+    const r = await fetch(`${DISPATCH}/inspect?rack=${encodeURIComponent(rackId)}`, { method: "POST" }).catch(() => null);
+    if (!r) setErr("Rover dispatcher not running");
+    else if (r.status === 409) setErr("Rover is busy");
+  };
+  const recent = (st?.log ?? []).slice(-3);
+  return (
+    <div className="send-rover">
+      <div className="send-rover-row">
+        <button className="rover-btn go" disabled={Boolean(err && !st) || st?.running} onClick={() => void send()}>
+          {st?.running ? "Rover on mission…" : "Send Rover to Inspect"}
+        </button>
+        <span className={`send-rover-phase ${st?.running ? "active" : ""}`}>
+          {err ? err : st?.running ? `${st.phase}${st.rack ? ` · ${st.rack}` : ""}` : "Rover ready"}
+        </span>
+      </div>
+      {recent.length > 0 && (
+        <ol className="rover-mission-log">
+          {recent.map((l, i) => (
+            <li key={`${l.t}-${i}`} className={l.m.startsWith("AI") ? "ai" : l.m.startsWith("TRIGGER") ? "trig" : ""}>
+              <span>{l.t}</span> {l.m}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 type Obj = Record<string, unknown>;
 const parse = (s: string): Obj => {
   try { return JSON.parse(s) as Obj; } catch { return {}; }

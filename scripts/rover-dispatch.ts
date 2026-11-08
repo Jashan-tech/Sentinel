@@ -60,7 +60,7 @@ const STALE_AFTER_SECONDS = Number(env("STALE_AFTER_MINUTES", "15")) * 60;
 const COOLDOWN_MS = 60_000;
 const APPROACH_CM = Number(env("ROVER_APPROACH_CM", "15")); // stop this far from the box (front tip)
 const APPROACH_SPEED = Number(env("ROVER_APPROACH_SPEED", "30"));
-const APPROACH_MAX_MS = Number(env("ROVER_APPROACH_MAX_MS", "8000"));
+const APPROACH_MAX_MS = Number(env("ROVER_APPROACH_MAX_MS", "4000")); // never drive blind longer than this
 const BACKUP_MS = Number(env("ROVER_BACKUP_MS", "700"));
 const TURN_SPEED = Number(env("ROVER_TURN_SPEED", "35"));
 const TURN_MS = Number(env("ROVER_TURN_MS", "700")); // roughly 90 degrees; calibrate on the floor
@@ -457,13 +457,11 @@ async function runMoves(steps: PatrolStep[]) {
  *  No wires on this face -> hard-coded move left for a better angle, then look again. */
 async function smartInspect(db: DbConnection, rackId: string, why: string) {
   log(`SMART INSPECT ${rackId}: ${why}`);
-  let l = await lookAndLog("start");
-  if (!l.rack_visible) {
-    log("AI decision: no server rack in view, so the rover stays put and takes no photo. Point the rover at the rack and try again.");
-    return;
-  }
+  // Always drive up to whatever is in front (ultrasonic stop), then look and decide.
+  let l: Look;
   if (DRIVE) {
     phase("driving to rack", rackId);
+    log("Driving forward until something is ahead (distance sensor)...");
     await approach();
     checkAbort();
     await sleep(600);
@@ -475,6 +473,14 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
       await sleep(500);
       l = await lookAndLog("backed up");
     }
+    if (!l.rack_visible) {
+      log("AI decision: no server rack here, so no photo. Backing away.");
+      phase("backing away", rackId);
+      await drive(-APPROACH_SPEED, BACKUP_MS);
+      return;
+    }
+  } else {
+    l = await lookAndLog("start");
   }
   let tries = 0;
   while (l.rack_visible && l.full_rack_visible && !l.wires_visible && tries < MAX_REPOSITION && DRIVE) {
