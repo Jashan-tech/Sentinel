@@ -209,6 +209,7 @@ try {
   const photo = manifest.images.find(
     (i: any) => i.file === "switch-5port-led-closeup.jpg",
   );
+  await a.getByRole("button", { name: "Upload Photo", exact: true }).click();
   await a
     .getByLabel("Image source", { exact: true })
     .selectOption("ONLINE_REFERENCE");
@@ -230,6 +231,11 @@ try {
     { timeout: 30000 },
   );
   let record = a.getByTestId("investigation-record");
+  await record.getByText("View Investigation Details", { exact: true }).click();
+  await b
+    .getByTestId("investigation-record")
+    .getByText("View Investigation Details", { exact: true })
+    .click();
   const firstId = (await record.getAttribute("data-id"))!;
   await expect(record.getByTestId("equipment-evidence")).toContainText(
     "NO_MATCH",
@@ -244,6 +250,7 @@ try {
     b.locator(`[data-id="${firstId}"]`).getByTestId("equipment-evidence"),
   ).toContainText("NO_MATCH");
   // Explicit installed identity gates the next investigation's references.
+  await a.locator(".identity-settings > summary").click();
   await a.getByLabel("Equipment manufacturer").fill("Cisco");
   await a.getByLabel("Equipment model").fill("C9300-24T");
   await expect(
@@ -263,6 +270,10 @@ try {
     b.locator(`[data-id="${id}"]`).getByTestId("equipment-evidence"),
   ).toContainText("CISCO-C9300-LED");
   await b.reload();
+  await b
+    .getByTestId("investigation-record")
+    .getByText("View Investigation Details", { exact: true })
+    .click();
   await expect(
     b.locator(`[data-id="${id}"]`).getByTestId("equipment-evidence"),
   ).toContainText("OPERATOR PROVIDED");

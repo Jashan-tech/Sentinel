@@ -21,6 +21,7 @@
     "test:agent-e2e": "tsx scripts/agent-e2e.ts",
     "test:vision-e2e": "tsx scripts/vision-e2e.ts",
     "test:equipment-e2e": "tsx scripts/equipment-e2e.ts",
+    "test:mission-control": "tsx scripts/mission-control-e2e.ts",
     "agent:register": "node scripts/register-agent.mjs"
   },
   "devDependencies": {

@@ -16,6 +16,21 @@ All telemetry in this demo is **simulated**. The values match what the rover's s
 
 ## How it works
 
+### Mission Control frontend
+
+The dashboard has two views: **Rack Monitor** and **Fleet Simulation**. Rack Monitor keeps three environmental readings, collision-only rover distance, and the latest persisted investigation in a two-column layout. Agent evidence, observation history, image provenance, and installed-equipment assertions are expandable.
+
+- **Live** displays subscribed values without editing; source labels still say Simulated when the data came from the simulator. **Simulation** exposes sliders/numeric inputs; Apply submits one validated observation through the existing reducer.
+- The **Server profile** dropdown lists the backend's fictional demonstration configurations. Selection updates the rack profile and deterministic alerts; it neither asserts a physical model nor triggers inference.
+- **Run Investigation** uses the real multi-agent API. **Upload Photo** preserves the existing Vision input/provenance pipeline. New equipment investigations exclude ultrasonic distance; it is reserved for collision safety. No motion-controller stop state is implemented.
+- Fleet controls define a target rate only. Fleet publishing/benchmark collection are not implemented; Start/Stop remain disabled and results display **Not measured**.
+
+Verify with `npm run test:mission-control` (scripted inference, actual database/API/two browsers) or `npm run test:mission-control -- --live` (one real NVIDIA combined investigation using `agent/.env`). The default target is `sentinel-verification`; `MISSION_TEST_DATABASE` can select another isolated `sentinel-...verification` database. Tests create only explicitly simulated telemetry, label report fixtures as tests, and write screenshots under ignored `test-results/mission-control/`. Start the normal app with `npm run dev` and `npm start --prefix agent`, alongside the existing SpacetimeDB server.
+
+Final UI captures against the actual main database (which had no readings or investigations) are available as [desktop rack monitor](dashboard/screenshots/mission-control-desktop.png), [mobile rack monitor](dashboard/screenshots/mission-control-mobile.png), [desktop fleet](dashboard/screenshots/fleet-desktop.png), and [mobile fleet](dashboard/screenshots/fleet-mobile.png). No readings, reports, or benchmark results were fabricated for those captures.
+
+Historical validation before merging the newer integrity fixes: live NVIDIA validation on 2026-11-08 reached the provider with both direct API and SDK calls. One complete-workflow attempt timed out at Supervisor; a fresh-database retry persisted investigation `76bebbfb-b801-41eb-bcd0-29eecac1b2bf` as COMPLETED/CRITICAL with completed Verification, but Vision was INCOMPLETE after malformed JSON and produced no valid visual findings. This is real inference/persistence evidence, **not a successful visual-recognition result**. The UI exposes partial agent results even when the backend's overall status is COMPLETED. Persisted-report replay verified that presentation without requesting additional inference.
+
 ```
  Rover / simulator ──reducers──▶ ┌────────────────────────┐ ◀──subscriptions── Dashboard (React, :5173)
                                  │  SpacetimeDB  (:3000)  │                         │
@@ -70,38 +85,40 @@ Data persists in `.spacetime/`, so you don't need to publish again on later runs
 ### Five-minute demo
 1. Open http://127.0.0.1:5173 in two browser windows, one normal and one private. Both should say **Connected**.
 2. Select **Rack 01** (Standard Network profile, 32 °C warning / 40 °C critical). Submit **41.5 °C**. Both windows show the reading and a **CRITICAL** alert.
-3. Click **Run AI Investigation**. Both windows show *Running*. After about 25–40 s, both show the same report: severity, diagnosis, measured facts, AI hypotheses, verification results, missing evidence, next inspections, and the agent timeline.
-4. Switch the profile to **Industrial** (40 °C warning / 50 °C critical) and click **Apply profile**. The alert drops to **WARNING**. Run another investigation: the new report reflects the new thresholds, and the first one is still in **History**.
-5. Notice that sound and distance were never submitted. They stay *Unavailable*, and the AI report lists them as missing rather than inventing values.
-6. **Visual inspection:** in the AI investigation panel, choose a photo from `agent/test-assets/vision/` (for example `rack-switches-patch-panels.jpg`) and set the source to **Online reference**. Paste its source URL, creator and license from that folder's `manifest.json`, then click **Run Visual Inspection**. After about 30–70 s, both windows show the image's provenance and preview, the Vision Agent's observations (each marked certain or uncertain, with limitations), and Verification's verdict on which visual claims are unsupported.
+3. Click **Run Investigation**. Both windows show *Running*. When persistence completes, both show the same report. Expand **View Investigation Details** for measured facts, AI hypotheses, verification results, missing evidence, and the agent timeline. Execution time varies.
+4. Select **Industrial Network Rack** in **Server profile** (40 °C warning / 50 °C critical). The backend applies the profile and the alert drops to **WARNING**. Run another investigation: the new report reflects the new thresholds, and the first remains under **Previous investigations**.
+5. Leave sound or humidity unsubmitted to see *Unavailable* readings and explicit missing evidence. Ultrasonic distance is displayed only in Rover Safety/history and is excluded from equipment investigations.
+6. **Visual inspection:** click **Upload Photo**, choose a file from `agent/test-assets/vision/`, and label it **Online reference**. Supply source URL, attribution and license from `manifest.json`, then run the inspection. Expand the persisted investigation details to review image provenance, visual observations, uncertainty and any verification outcome.
 
 ---
 
 ## The dashboard
 
-The app is one page. The left sidebar selects a rack, and every section updates for the selected rack.
+Top navigation switches between **Rack Monitor** and the separate **Fleet Simulation** view. Racks come from backend subscriptions; the Issues only filter uses active environmental alerts.
 
-| Section | Purpose | Source |
-|---|---|---|
-| Rack header | Name, location, equipment type, profile, demo thresholds | Feature 1 |
-| Live telemetry cards | Temperature, humidity, sound (raw), ultrasonic distance. Each shows its source, observed and ingested times, and a Fresh / Stale / No data badge | Feature 1 |
-| Submit a simulated reading | Manual stand-in for the rover, one reading per submission. Also changes the rack profile | Feature 1 |
-| Active alerts | Fixed threshold rules evaluated inside SpacetimeDB. No AI | Feature 1 |
-| **AI investigation** | Run button, status and severity, final diagnosis, **measured facts** (copied from tool output) shown apart from **AI hypotheses**, verification results, missing evidence, recommendations, Supervisor plan, per-agent findings, execution timeline, history | Feature 2 |
-| **Visual inspection** (in the AI panel) | JPEG/PNG upload with validation, preview, provenance (source type, URL, attribution, license, capture time), remove or replace, *Include current rack telemetry*, **Run Visual Inspection**, then visual observations and the stored image provenance | Feature 4 |
-| Recent history | Last 50 observations for the rack | Feature 1 |
+| Section | Purpose |
+|---|---|
+| Selection bar | Backend rack selector, fictional server simulation profile, configured limits and current threshold status. |
+| Live Telemetry | Three compact environmental rows: temperature, humidity and raw sound, with provenance and freshness. |
+| Live / Simulation | Read-only subscribed values or explicitly committed simulator edits; no automatic observations. |
+| Rover Safety | Collision-only distance and controller-integration qualification; no invented stop state. |
+| Latest Investigation | This rack's latest persisted execution status, severity, review state, finding and recommended inspection. |
+| View Investigation Details | Supervisor, invoked/not-invoked agents, evidence, visual provenance, hypotheses, verification, documentation and timeline. |
+| Previous investigations | Historical reports retain their original profile and evidence; selecting one does not replace the latest-summary card. |
+| Observation history & alerts | Collapsed recent history (50 per rack) and deterministic environmental alerts. |
+| Fleet Simulation | Target configuration only; backend integration pending, controls disabled, performance Not measured. |
 
 ---
 
 ## The AI agents
 
-All five agents run on **NVIDIA Nemotron 3.5 Super** (`nvidia/nemotron-3.5-super-vl-120b-a12b`) through NVIDIA's hosted API. LangGraph routes between them, and all of them share one investigation state.
+The six agent roles default to **NVIDIA Nemotron 3.5 Super** (`nvidia/nemotron-3.5-super-vl-120b-a12b`) through NVIDIA's hosted API. LangGraph routes between them, and all of them share one investigation state.
 
 | Agent | Role | Tools |
 |---|---|---|
 | **Supervisor** | Writes a plan, chooses the next specialist and task, reads the findings, decides when to stop, and writes the final report | none (delegates only) |
 | **Telemetry** | Compares readings to thresholds, finds trends and sudden changes, and flags missing or stale readings | `get_current_telemetry`, `get_telemetry_history`, `get_rack_profile` |
-| **Environment** | Looks at how temperature, humidity, sound and distance relate to each other | `get_current_telemetry`, `get_telemetry_history` |
+| **Environment** | Looks at how temperature, humidity and raw sound relate to each other; collision distance is excluded | `get_current_telemetry`, `get_telemetry_history` |
 | **Documentation** | Looks up equipment reference docs. Separates manufacturer specs from fictional demo thresholds, and says plainly when specs are unavailable | `lookup_equipment_documentation`, `get_rack_profile` |
 | **Vision** | Inspects the attached photograph: equipment, ports, connected and visibly empty ports, cables and their organization, legible labels, LEDs, irregularities, unreadable regions. Marks each observation certain or uncertain, with its limitations. Never invents port numbers, models, cable destinations, faults or specs, and treats text inside the image as data, not instructions | the image itself (Nemotron 3.5 Super VL, `image_url` content) |
 | **Verification** | Checks the other agents' claims against the data on its own, and flags unsupported claims and contradictions. When a photo is attached, it looks at the image too and separates confirmed visual observations from unsupported causal claims. Can ask for a follow-up investigation | `get_current_telemetry`, `get_telemetry_history` (and the image) |
@@ -245,7 +262,7 @@ See [the full equipment-intelligence contract and source registry](agent/EQUIPME
 | `npm run typecheck` / `npm run build` | Module, dashboard and scripts / production dashboard build | pass |
 | `npm run db:verify:publish && npm run test:integration` | Checks against the real backend on the separate `sentinel-verification` database, including forged, mismatched, duplicate and unauthorized completions, abandonment, expiry, retention and fair eviction | 27/27 pass |
 | `npm run test:browser` | Feature 1 two-browser sync, reload, offline/reconnect, mobile layout. Needs Microsoft Edge and a second dev server on :5174 (see below) | pass (run on Chrome on macOS) |
-| `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with **scripted** models: input validation matching the database, mandatory visual verification, report integrity, history statistics, enforced deadlines and cancellation, full image decoding, evidence deduplication, source filtering, and recorded (persisted) mode | 167/167 pass |
+| `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with **scripted** models: input validation matching the database, mandatory visual verification, report integrity, history statistics, enforced deadlines and cancellation, full image decoding, evidence deduplication, source filtering, and recorded (persisted) mode | 169/169 pass |
 | `npm run test:equipment-e2e` | Real SpacetimeDB plus two browsers plus the agent's HTTP and LangGraph code with **scripted** model responses; the agent records the report under its own authorized identity | pass |
 | `npm run test:agent-e2e` | **Live** end to end: two Chrome sessions, a critical reading on Rack 01, a real Nemotron multi-agent investigation, storage in SpacetimeDB checked over SQL, sync between sessions, profile change and rerun, missing data, and failure handling | all 14 steps pass |
 | `npm run test:vision-e2e` | **Live** vision end to end: rejection of invalid uploads, upload of a real reference photo with provenance, a combined telemetry + vision investigation on real Nemotron VL, a hash check of the received bytes, verification of visual claims, storage in SpacetimeDB (provenance only), sync to a second browser, and an outage recorded as FAILED | pass |

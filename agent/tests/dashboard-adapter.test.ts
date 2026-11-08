@@ -45,6 +45,17 @@ test("adapter keeps missing readings missing", () => {
   assert.deepEqual(req.recent_telemetry, []);
 });
 
+test("collision distance never enters equipment current/history or alert context", () => {
+  const distance = obs("rack-1", "ULTRASONIC_DISTANCE_CM", 3, "cm", "2026-11-07T22:00:00Z");
+  const req = InvestigationRequest.parse(buildInvestigationRequest({
+    ...base, current: [...base.current, distance], recent: [...base.recent, distance],
+    alerts: [...base.alerts, { ...base.alerts[0], metricType: "ULTRASONIC_DISTANCE_CM", message: "Collision-only test" }],
+  }));
+  assert(!req.current_telemetry.some(r => r.metric_type === "ULTRASONIC_DISTANCE_CM"));
+  assert(!req.recent_telemetry.some(r => r.metric_type === "ULTRASONIC_DISTANCE_CM"));
+  assert(!req.active_alerts.some(a => a.metric_type === "ULTRASONIC_DISTANCE_CM"));
+});
+
 test("timestamps convert to ISO 8601", () => {
   assert.equal(toIso(us("2026-11-07T22:00:00.123Z")), "2026-11-07T22:00:00.123Z");
 });

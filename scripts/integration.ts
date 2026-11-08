@@ -266,7 +266,10 @@ try {
     b,
     () =>
       b.db.rackAlert.alertId.find("rack-1:RELATIVE_HUMIDITY_PERCENT")
-        ?.active === true,
+        ?.active === true &&
+      b.db.currentTelemetry.currentKey.find("rack-1:RELATIVE_HUMIDITY_PERCENT")
+        ?.observedAt.microsSinceUnixEpoch ===
+        start - 5_000_000n,
   );
   check("independent timestamps and humidity warning", () => {
     assert.equal(

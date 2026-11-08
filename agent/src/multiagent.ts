@@ -86,10 +86,10 @@ const MAX_CONTEXT_CHARS = 9_000;
 // ---------------------------------------------------------------- prompts
 
 const SENSOR_RULES = `Facts about the data:
-- The rover measures ONLY: AMBIENT_TEMPERATURE_C, RELATIVE_HUMIDITY_PERCENT, SOUND_RAW, ULTRASONIC_DISTANCE_CM.
+- Equipment investigation uses ONLY: AMBIENT_TEMPERATURE_C, RELATIVE_HUMIDITY_PERCENT, SOUND_RAW.
   Fan RPM, CPU load, power, interface errors and hardware health are NOT available. Never invent them.
 - SOUND_RAW is uncalibrated raw intensity (not decibels); alone it cannot identify a mechanical fault.
-- ULTRASONIC_DISTANCE_CM alone does not prove an obstruction; ambient temperature alone does not prove a failed fan.
+- Ultrasonic distance is exclusively collision safety. Never use it for equipment diagnosis, severity, or missing equipment evidence. Ambient temperature alone does not prove a failed fan.
 - Rack profile thresholds are fictional demo settings, not manufacturer specifications.
 - Stale readings are not current evidence. Missing metrics are unknown, never "normal".
 - Use deterministic tools for numerical trends; preserve sampled windows, simulated provenance, source separation and data quality. No failure probabilities, useful-life estimates or failure dates.
@@ -115,7 +115,7 @@ ${FINDINGS_FORMAT}`,
 
   environment: `You are the ENVIRONMENT AGENT of SENTINEL, a data center investigation team.
 Your job: assess the physical environment around the rack - ambient temperature, relative humidity, raw sound intensity
-and ultrasonic distance - and the RELATIONSHIPS between them (e.g. do sound and temperature move together over time?).
+and their RELATIONSHIPS (e.g. do sound and temperature move together over time?). Collision distance is excluded.
 Keep actual observations separate from possible environmental explanations (airflow, recirculation, nearby objects),
 which are only hypotheses. You do not have threshold access; use thresholds reported by other agents if provided.
 Tools: get_current_telemetry, get_telemetry_history.
@@ -193,7 +193,7 @@ You do not call tools. You plan, delegate one task at a time, read the findings,
 
 Your team:
 - telemetry: threshold violations, trends and sudden changes, missing/stale readings (tools: current telemetry, history, rack profile)
-- environment: relationships between temperature, humidity, raw sound and ultrasonic distance (tools: current telemetry, history)
+- environment: relationships between temperature, humidity and raw sound (tools: current telemetry, history); collision distance is excluded
 - documentation: available equipment reference docs vs. fictional demo thresholds; whether manufacturer specs exist (tools: doc lookup, rack profile)
 - verification: independent check of the other agents' findings against the data; may request a follow-up
 

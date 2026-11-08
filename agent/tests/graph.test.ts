@@ -127,7 +127,7 @@ test("HTTP: concurrent investigations stay isolated", async () => {
     const rc = (await c.json()).report;
     assert.equal(ra.rack_id, "rack-net-01");
     assert.equal(rc.rack_id, "rack-cmp-03");
-    assert.match(ra.tool_calls[0].result_summary, /4 reading/);
+    assert.match(ra.tool_calls[0].result_summary, /3 reading/); // Equipment metrics only.
     assert.equal(ra.tool_calls[0].args.rack_id, "rack-net-01");
     assert.equal(rc.tool_calls[0].args.rack_id, "rack-cmp-03");
   });

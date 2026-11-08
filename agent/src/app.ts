@@ -129,6 +129,11 @@ export function createApp(deps: AppDeps = {}) {
       throw err;
     }
 
+    // Collision safety remains outside equipment reasoning in both stored and stateless requests.
+    request.current_telemetry = request.current_telemetry.filter(r => r.metric_type !== "ULTRASONIC_DISTANCE_CM");
+    request.recent_telemetry = request.recent_telemetry.filter(r => r.metric_type !== "ULTRASONIC_DISTANCE_CM");
+    request.active_alerts = request.active_alerts.filter(a => a.metric_type !== "ULTRASONIC_DISTANCE_CM");
+
     let model: InvestigatorModel, specialistModel: InvestigatorModel | undefined, visionModel: InvestigatorModel | undefined, config: AgentConfig;
     try {
       ({ model, specialistModel, visionModel, config } = getModel());
