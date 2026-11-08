@@ -69,6 +69,7 @@ npm run db:build                     # terminal 2: typecheck + build the module
 npm run db:publish                   # publish database "sentinel"
 npm run db:generate                  # regenerate dashboard client bindings
 npm run agent:register               # authorize the agent service to record reports (writes agent/.env)
+npm run bench:register               # optional: authorize the fleet benchmark runner (writes benchmark/.env)
 ```
 
 `agent:register` gives the agent service its own SpacetimeDB identity and authorizes it. Run it as the identity that published the database, which is your SpacetimeDB CLI login. On a database published before this change, it first claims the admin role once for that identity. Restart the agent afterwards. Without it, investigations fail with "Agent cannot record investigations".
@@ -78,6 +79,7 @@ npm run agent:register               # authorize the agent service to record rep
 npm run db:start                     # 1. SpacetimeDB          → :3000
 cd agent && npm start                # 2. Nemotron agent        → :3001
 npm run dev                          # 3. Dashboard             → http://127.0.0.1:5173
+npm run bench:runner                 # 4. optional: fleet benchmark load generator (serves Start/Stop on Fleet Simulation)
 ```
 
 Data persists in `.spacetime/`, so you don't need to publish again on later runs. Start only one SpacetimeDB server on port 3000.
@@ -106,7 +108,7 @@ Top navigation switches between **Rack Monitor** and the separate **Fleet Simula
 | View Investigation Details | Supervisor, invoked/not-invoked agents, evidence, visual provenance, hypotheses, verification, documentation and timeline. |
 | Previous investigations | Historical reports retain their original profile and evidence; selecting one does not replace the latest-summary card. |
 | Observation history & alerts | Collapsed recent history (50 per rack) and deterministic environmental alerts. |
-| Fleet Simulation | Target configuration only; backend integration pending, controls disabled, performance Not measured. |
+| Fleet Simulation | SpacetimeDB benchmark: Ramp Test / Fixed Load, one live P95 latency chart, six measured metrics and per-stage details, all read from rows the external load generator stored. See [Fleet benchmark](#fleet-benchmark). |
 
 ---
 
@@ -254,13 +256,78 @@ See [the full equipment-intelligence contract and source registry](agent/EQUIPME
 
 ---
 
+## Fleet benchmark
+
+The **Fleet Simulation** page measures how SpacetimeDB behaves as SENTINEL scales from one simulated rover to thousands. **No performance number is hardcoded, estimated or produced in the browser.** Each value on the page is read from rows that an external load generator stored after measuring real reducer calls and real subscriptions against the running database. A value that can't be measured shows as *Not measured* or *Insufficient samples*.
+
+### Running it
+```bash
+npm run bench:register      # once per database: authorizes a runner identity, writes benchmark/.env (git-ignored)
+npm run bench:runner        # leave running; the dashboard's Start/Stop buttons talk to it through SpacetimeDB
+# or from the command line, without the dashboard:
+npm run bench -- --mode fixed --rovers 1000 --eps 1 --duration 30
+npm run bench -- --mode ramp  --rovers 5000 --eps 1 --duration 10   # duration = seconds per stage
+```
+
+| Mode | What runs |
+|---|---|
+| Fixed Load | One stage: *rovers × events per rover per second* for the chosen duration (5–120 s). |
+| Ramp Test | Stages 1 → 100 → 500 → 1,000 → 2,500 → 5,000 rovers. Stages above the selected maximum are skipped and the maximum is the final stage. Stage 1 (one rover) is the measured single-rover baseline. 5–30 s per stage. |
+
+Limits enforced by the reducer: 1–5,000 rovers, 1–10 events per rover per second, 1–4 subscribers, one active run at a time. A request nobody claims within 30 s is failed, and so is a run still active after 300 s.
+
+### Architecture
+- **Workload:** an append-only SIMULATED event stream. Each event is one `bench_write` reducer call carrying a unique `(run_id, event_no)`, a rover index, a per-rover sequence and a synthetic temperature. Rows go into `benchmark_event`, an **event table**: subscribers receive them in the committing transaction, but they're never stored. Benchmark load therefore never grows storage and never touches rack telemetry or investigations. Every event is unique, so no update is ever coalesced and a missing row really is a missing delivery.
+- **Load generator** (`benchmark/`, Node.js): uses 4 writer WebSocket connections (`BENCH_WRITERS`) under the runner's authorized identity, and 2 anonymous subscriber connections subscribed to `SELECT * FROM benchmark_event WHERE run_id = N`. Rovers are logical; 5,000 rovers do not mean 5,000 sockets.
+- **Rate control:** open loop. Event *k* is due at *k / rate*, and a stage schedules exactly *rate × duration* events. The in-flight window is bounded (`BENCH_MAX_IN_FLIGHT`, default 2,000). Events due while the window is full are **skipped and counted** as *Skipped (backpressure)*, never queued, so overload shows up as an achieved rate below target.
+- **Control plane:** the dashboard calls `request_benchmark_run` and `stop_benchmark_run`. The runner subscribes to `benchmark_run`, claims requests, and reports through `report_benchmark_sample` (one row per ~1 s window), `report_benchmark_stage` and `finish_benchmark_run`. Only the authorized runner that claimed a run can write events or measurements for it. If the runner disconnects, the run is marked FAILED and its partial results are kept. The newest 10 finished runs are retained.
+
+### What each metric means
+| Metric | Source |
+|---|---|
+| Attempted writes | Reducer calls the generator issued. |
+| Acknowledged | The reducer call's promise resolved: SpacetimeDB replied Ok. |
+| Server committed | The change in SpacetimeDB's **own** counter `spacetime_num_txns_total{reducer="bench_write",committed="true"}` from `/v1/metrics` over the stage. This is an independent server-side count. |
+| Rejected | The reducer replied with `SenderError` (validation or authorization). Reasons are recorded per stage. |
+| Transport errors | Any other failure: disconnect, internal error. |
+| Unresolved | Attempted − acknowledged − rejected − transport errors at the end of the drain. Stored stages must add up exactly. |
+| Subscriber-observed | (event, subscriber) pairs in which a subscriber connection received an acknowledged event through its subscription. An acknowledgement is never counted as a delivery. |
+| Delivery success | Observed pairs ÷ (acknowledged × subscribers), over drained stages only. Shown as *Pending* while a stage is still draining. |
+| Actual throughput | Live: acknowledged writes in the latest ~1 s window. Per stage: acknowledged ÷ (stage start → later of send-phase end and last acknowledgement). |
+| Delivery latency P50/P95/P99 | Subscriber receipt time − send time. Both are read from `performance.now()` in the same generator process, so no clock synchronization is involved. Nearest-rank over measured samples; P50 needs ≥ 5 samples, P95 ≥ 20, P99 ≥ 100, otherwise *Insufficient samples*. Ack latency is reported separately. |
+| Active rovers / subscribers | The rovers in the current stage, and the subscriber connections whose subscription is applied and still connected. |
+| Generator loop P99 | Node.js event-loop delay in the generator (`monitorEventLoopDelay`, 1 ms sampling, so it includes about 1 ms of sampling interval). Use it to tell when the generator itself, not the database, is the bottleneck. |
+
+**The chart, "Single Rover vs Fleet — P95 Latency":**
+- **Points:** one point per ~1 s window that has enough samples. Windows without enough samples are left blank; the line is never interpolated.
+- **In a Ramp Test:** the one-rover stage is the baseline series. At low rates, its 1 s windows rarely reach 20 samples, so the dashed baseline line uses all samples from that stage instead.
+- **In a Fixed Load test:** the baseline is the most recent single-rover stage from an earlier run at the same events-per-rover rate, labelled *previously measured (run #N)*.
+
+### Measured on the development machine
+Measured on 2026-11-08 on an Apple-silicon MacBook Pro (10 CPUs, macOS 25.6, Node 24.15), against a local SpacetimeDB 2.14.1 standalone server, with the generator on the same machine. Ramp Test, 2 events per rover per second, 10 s per stage, 2 subscribers:
+
+| Rovers | Target/s | Achieved/s | Attempted = acknowledged = server committed | Delivered | P50 ms | P95 ms | P99 ms |
+|---|---|---|---|---|---|---|---|
+| 1 | 2 | 2.0 | 20 | 100.00% | 5.5 | 7.4 | Insufficient samples |
+| 100 | 200 | 200.0 | 2,000 | 100.00% | 3.8 | 5.2 | 7.3 |
+| 500 | 1,000 | 999.2 | 10,000 | 100.00% | 6.7 | 9.3 | 11.4 |
+| 1,000 | 2,000 | 1,998.9 | 20,000 | 100.00% | 6.7 | 9.2 | 10.0 |
+| 2,500 | 5,000 | 4,996.1 | 50,000 | 100.00% | 6.2 | 8.4 | 9.6 |
+| 5,000 | 10,000 | 9,992.1 | 100,000 | 100.00% | 6.5 | 8.8 | 10.8 |
+
+Fixed Load, 5,000 rovers × 10 events per second for 10 s (target 50,000/s): achieved 49,951.6/s, 499,974 attempted and acknowledged, 0 rejected, 0 skipped, 100.00% delivered to both subscribers, P95 7.7 ms. Across the first three live runs, SpacetimeDB's own `/v1/metrics` counted 610,982 committed `bench_write` transactions, exactly the generator's acknowledged total (20,000 + 91,008 + 499,974). These are single runs on one laptop, not a capacity guarantee. Rerun on your own hardware; numbers vary from run to run.
+
+---
+
 ## Testing
 
 | Command | What it covers | Last result |
 |---|---|---|
-| `npm test` | SpacetimeDB rules, investigation-record validation (rack match, structure, verification consistency), abandon and expiry records, retention, fair eviction, image provenance, and the rule that rows never contain image bytes | 42/42 pass |
+| `npm test` | SpacetimeDB rules, investigation-record validation (rack match, structure, verification consistency), abandon and expiry records, retention, fair eviction, image provenance, and the rule that rows never contain image bytes; plus **unit** tests (scripted transport, fake clocks) for the fleet benchmark: rate control, ramp scheduling, unique event ids, ack/reject/transport counting, subscriber delivery tracking, latency percentiles, missing measurements, stop and cancellation, multiple subscribers, server-metric parsing and dashboard metric rendering | 94/94 pass |
 | `npm run typecheck` / `npm run build` | Module, dashboard and scripts / production dashboard build | pass |
 | `npm run db:verify:publish && npm run test:integration` | Checks against the real backend on the separate `sentinel-verification` database, including forged, mismatched, duplicate and unauthorized completions, abandonment, expiry, retention and fair eviction | 27/27 pass |
+| `npm run db:verify:publish && npm run test:bench-live` | **Live** fleet benchmark against the real backend (`sentinel-verification`): unsafe configs and unauthorized runners refused, run isolation, a real Fixed Load and Ramp Test, stored rows equal to the measurements, server-side committed count equal to acknowledgements, rejected writes classified, the event table not retained, rack data untouched, stop, and runner-crash recovery | 27/27 pass |
+| `npx tsx scripts/benchmark-e2e.ts` | **Live** browser check of Fleet Simulation (needs `bench:runner`): starts a Ramp Test and a Fixed Load from the page, compares every headline number, chart point and stage row with the database, stops a run, and checks phone width | pass |
 | `npm run test:browser` | Feature 1 two-browser sync, reload, offline/reconnect, mobile layout. Needs Microsoft Edge and a second dev server on :5174 (see below) | pass (run on Chrome on macOS) |
 | `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with **scripted** models: input validation matching the database, mandatory visual verification, report integrity, history statistics, enforced deadlines and cancellation, full image decoding, evidence deduplication, source filtering, and recorded (persisted) mode | 169/169 pass |
 | `npm run test:equipment-e2e` | Real SpacetimeDB plus two browsers plus the agent's HTTP and LangGraph code with **scripted** model responses; the agent records the report under its own authorized identity | pass |
@@ -284,7 +351,9 @@ dashboard/            React + Vite dashboard
   src/investigation.ts        adapter from SpacetimeDB rows to the agent request, plus response validation
   src/imageUpload.ts          browser-side image validation, hashing and preview
   src/module_bindings/        generated by `npm run db:generate` (do not edit)
+  src/FleetSimulation.tsx     fleet benchmark page; src/benchmarkView.ts is its pure view model
 agent/                Nemotron multi-agent investigation service (see agent/README.md)
+benchmark/            fleet benchmark load generator (rate control, collector, SpacetimeDB transport, CLI/runner) + unit tests
   test-assets/vision/         6 Wikimedia Commons reference photos + manifest.json (license, creator, sha256) + review guide
 scripts/              CLI helper, backend integration test, browser tests, live agent end-to-end test
 ```
@@ -303,7 +372,14 @@ scripts/              CLI helper, backend integration test, browser tests, live 
 - Combined telemetry-plus-photo runs can hit the 130 s budget. The report is then `INCOMPLETE` and says why.
 - Manufacturer guidance is limited to the exact supported identities in the curated source registry. Unknown identities receive NO_MATCH. Rover ambient telemetry cannot automatically establish manufacturer operating compliance.
 - Access control is suitable only for a local demo.
-- `npm run test:browser` and `npm run test:equipment-e2e` default to Microsoft Edge. Set `E2E_BROWSER_CHANNEL=chrome` to use Chrome.
+- `npm run test:browser`, `npm run test:equipment-e2e` and `scripts/mission-control-e2e.ts` default to Microsoft Edge. Set `E2E_BROWSER_CHANNEL=chrome` to use Chrome.
+- **Fleet benchmark:**
+  - **Same machine:** the generator, its subscribers and the server share one machine and one Node.js process. Latency therefore includes the generator's own event-loop delay (reported per stage). At high rates, the generator rather than SpacetimeDB may be the limit.
+  - **Latency scope:** latency is a local loopback figure and says nothing about rover radio links or remote networks.
+  - **Workload shape:** each event is its own transaction. There's no batching, which is the conservative case.
+  - **Server counter scope:** the server-committed figure counts every `bench_write` transaction on the database during the stage, which is only meaningful because one run is allowed at a time.
+  - **Shared database:** the benchmark shares the database, and so the CPU, with the live demo. Heavy runs can slow rack updates while they last.
+  - **Permissions:** anyone viewing the dashboard can start or stop a run, within the reducer's limits. That's acceptable only for a local demo.
 
 ## References
 

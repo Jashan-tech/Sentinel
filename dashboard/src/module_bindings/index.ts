@@ -37,18 +37,33 @@ import {
 import AbandonInvestigationReducer from "./abandon_investigation_reducer";
 import AttachInvestigationImageReducer from "./attach_investigation_image_reducer";
 import AuthorizeAgentReducer from "./authorize_agent_reducer";
+import AuthorizeBenchmarkRunnerReducer from "./authorize_benchmark_runner_reducer";
+import BenchWriteReducer from "./bench_write_reducer";
 import ChangeRackProfileReducer from "./change_rack_profile_reducer";
 import ClaimAdminReducer from "./claim_admin_reducer";
+import ClaimBenchmarkRunReducer from "./claim_benchmark_run_reducer";
 import CompleteInvestigationReducer from "./complete_investigation_reducer";
+import FinishBenchmarkRunReducer from "./finish_benchmark_run_reducer";
 import IngestSimulatedObservationReducer from "./ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "./initialize_demo_reducer";
+import RegisterBenchmarkRunnerReducer from "./register_benchmark_runner_reducer";
+import ReportBenchmarkSampleReducer from "./report_benchmark_sample_reducer";
+import ReportBenchmarkStageReducer from "./report_benchmark_stage_reducer";
+import RequestBenchmarkRunReducer from "./request_benchmark_run_reducer";
 import RevokeAgentReducer from "./revoke_agent_reducer";
 import SetRunningTimeoutReducer from "./set_running_timeout_reducer";
 import StartInvestigationReducer from "./start_investigation_reducer";
+import StopBenchmarkRunReducer from "./stop_benchmark_run_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import BenchmarkEventRow from "./benchmark_event_table";
+import BenchmarkRunRow from "./benchmark_run_table";
+import BenchmarkRunnerRow from "./benchmark_runner_table";
+import BenchmarkSampleRow from "./benchmark_sample_table";
+import BenchmarkStageRow from "./benchmark_stage_table";
+import BenchmarkStageServerRow from "./benchmark_stage_server_table";
 import CurrentTelemetryRow from "./current_telemetry_table";
 import InvestigationRow from "./investigation_table";
 import InvestigationCompletionRow from "./investigation_completion_table";
@@ -62,6 +77,78 @@ import RecentObservationRow from "./recent_observation_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  benchmarkEvent: __table({
+    name: 'benchmark_event',
+    indexes: [
+    ],
+    constraints: [
+    ],
+    event: true,
+  }, BenchmarkEventRow),
+  benchmarkRun: __table({
+    name: 'benchmark_run',
+    indexes: [
+      { accessor: 'runId', name: 'benchmark_run_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+    ],
+    constraints: [
+      { name: 'benchmark_run_run_id_key', constraint: 'unique', columns: ['runId'] },
+    ],
+  }, BenchmarkRunRow),
+  benchmarkRunner: __table({
+    name: 'benchmark_runner',
+    indexes: [
+      { accessor: 'connectionKey', name: 'benchmark_runner_connection_key_idx_btree', algorithm: 'btree', columns: [
+        'connectionKey',
+      ] },
+    ],
+    constraints: [
+      { name: 'benchmark_runner_connection_key_key', constraint: 'unique', columns: ['connectionKey'] },
+    ],
+  }, BenchmarkRunnerRow),
+  benchmarkSample: __table({
+    name: 'benchmark_sample',
+    indexes: [
+      { accessor: 'runId', name: 'benchmark_sample_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { accessor: 'sampleId', name: 'benchmark_sample_sample_id_idx_btree', algorithm: 'btree', columns: [
+        'sampleId',
+      ] },
+    ],
+    constraints: [
+      { name: 'benchmark_sample_sample_id_key', constraint: 'unique', columns: ['sampleId'] },
+    ],
+  }, BenchmarkSampleRow),
+  benchmarkStage: __table({
+    name: 'benchmark_stage',
+    indexes: [
+      { accessor: 'runId', name: 'benchmark_stage_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { accessor: 'stageKey', name: 'benchmark_stage_stage_key_idx_btree', algorithm: 'btree', columns: [
+        'stageKey',
+      ] },
+    ],
+    constraints: [
+      { name: 'benchmark_stage_stage_key_key', constraint: 'unique', columns: ['stageKey'] },
+    ],
+  }, BenchmarkStageRow),
+  benchmarkStageServer: __table({
+    name: 'benchmark_stage_server',
+    indexes: [
+      { accessor: 'runId', name: 'benchmark_stage_server_run_id_idx_btree', algorithm: 'btree', columns: [
+        'runId',
+      ] },
+      { accessor: 'stageKey', name: 'benchmark_stage_server_stage_key_idx_btree', algorithm: 'btree', columns: [
+        'stageKey',
+      ] },
+    ],
+    constraints: [
+      { name: 'benchmark_stage_server_stage_key_key', constraint: 'unique', columns: ['stageKey'] },
+    ],
+  }, BenchmarkStageServerRow),
   currentTelemetry: __table({
     name: 'current_telemetry',
     indexes: [
@@ -178,14 +265,23 @@ const reducersSchema = __reducers(
   __reducerSchema("abandon_investigation", AbandonInvestigationReducer),
   __reducerSchema("attach_investigation_image", AttachInvestigationImageReducer),
   __reducerSchema("authorize_agent", AuthorizeAgentReducer),
+  __reducerSchema("authorize_benchmark_runner", AuthorizeBenchmarkRunnerReducer),
+  __reducerSchema("bench_write", BenchWriteReducer),
   __reducerSchema("change_rack_profile", ChangeRackProfileReducer),
   __reducerSchema("claim_admin", ClaimAdminReducer),
+  __reducerSchema("claim_benchmark_run", ClaimBenchmarkRunReducer),
   __reducerSchema("complete_investigation", CompleteInvestigationReducer),
+  __reducerSchema("finish_benchmark_run", FinishBenchmarkRunReducer),
   __reducerSchema("ingest_simulated_observation", IngestSimulatedObservationReducer),
   __reducerSchema("initialize_demo", InitializeDemoReducer),
+  __reducerSchema("register_benchmark_runner", RegisterBenchmarkRunnerReducer),
+  __reducerSchema("report_benchmark_sample", ReportBenchmarkSampleReducer),
+  __reducerSchema("report_benchmark_stage", ReportBenchmarkStageReducer),
+  __reducerSchema("request_benchmark_run", RequestBenchmarkRunReducer),
   __reducerSchema("revoke_agent", RevokeAgentReducer),
   __reducerSchema("set_running_timeout", SetRunningTimeoutReducer),
   __reducerSchema("start_investigation", StartInvestigationReducer),
+  __reducerSchema("stop_benchmark_run", StopBenchmarkRunReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

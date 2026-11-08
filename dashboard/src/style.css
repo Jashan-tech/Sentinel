@@ -1894,3 +1894,136 @@ footer > span {
   font-size: 10px;
   margin: 0 0 24px;
 }
+
+/* ---- Fleet benchmark ---- */
+.fleet-page {
+  --bench-fleet: #1f9fb8;
+  --bench-baseline: #9273ec;
+}
+.fleet-config {
+  max-width: none;
+}
+.bench-state.state-running { color: var(--cyan); }
+.bench-state.state-completed { color: var(--green); }
+.bench-state.state-failed { color: var(--red); }
+.bench-state.state-stopped { color: var(--amber); }
+.bench-mode {
+  display: inline-flex;
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.bench-mode button {
+  border: 0;
+  border-radius: 0;
+  padding: 10px 18px;
+  background: transparent;
+}
+.bench-mode button.selected {
+  background: var(--surface-raised);
+  color: var(--cyan);
+}
+.bench-controls {
+  grid-template-columns: repeat(3, 1fr);
+}
+.bench-target {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.unmeasured {
+  color: var(--muted) !important;
+  font-size: 18px !important;
+  letter-spacing: 0 !important;
+}
+.bench-status {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.bench-status .ok::before { content: "● "; color: var(--green); }
+.bench-status .warn::before { content: "● "; color: var(--amber); }
+.bench-status .error { color: var(--red); }
+.bench-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 20px;
+}
+.bench-metrics .benchmark strong {
+  font-size: 26px;
+  color: #d1e0eb;
+}
+.bench-metrics .benchmark strong small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.bench-chart-panel,
+.bench-details {
+  margin-top: 20px;
+  padding: 24px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 11px;
+  color: #a9bccd;
+  margin: 12px 0;
+}
+.chart-legend .muted { color: var(--muted); }
+.swatch {
+  display: inline-block;
+  width: 16px;
+  height: 0;
+  border-top: 2px solid;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.swatch.fleet { border-color: var(--bench-fleet); }
+.swatch.baseline { border-color: var(--bench-baseline); }
+.swatch.dashed { border-top-style: dashed; }
+.bench-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.bench-chart .grid { stroke: var(--line); stroke-width: 1; }
+.bench-chart .tick { fill: var(--muted); font-size: 10px; }
+.bench-chart .stage-mark { stroke: #2b3f57; stroke-dasharray: 2 4; }
+.bench-chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.bench-chart .series.fleet { stroke: var(--bench-fleet); }
+.bench-chart .series.baseline { stroke: var(--bench-baseline); }
+.bench-chart .ref-line { stroke: var(--bench-baseline); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.bench-chart .dot { stroke: var(--surface); stroke-width: 2; }
+.bench-chart .dot.fleet { fill: var(--bench-fleet); }
+.bench-chart .dot.baseline { fill: var(--bench-baseline); }
+.bench-chart .crosshair { stroke: #6f8aa3; stroke-width: 1; }
+.chart-tooltip { font-size: 11px; color: #a9bccd; margin: 8px 0 0; min-height: 16px; }
+.chart-empty { color: var(--muted); font-size: 13px; padding: 40px 0; text-align: center; }
+.bench-details summary { cursor: pointer; font-weight: 500; }
+.bench-counters {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.bench-counters b { color: #d1e0eb; font-weight: 500; margin-left: 4px; }
+.table-scroll { overflow-x: auto; }
+.bench-table { border-collapse: collapse; font-size: 11px; width: 100%; white-space: nowrap; }
+.bench-table th, .bench-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: right; }
+.bench-table th { color: var(--muted); font-weight: 500; }
+.bench-message, .bench-env, .bench-method { font-size: 11px; color: var(--muted); line-height: 1.6; }
+@media (max-width: 760px) {
+  .bench-controls, .bench-target, .bench-metrics { grid-template-columns: 1fr; }
+  .bench-mode { display: flex; }
+  .bench-mode button { flex: 1; }
+}

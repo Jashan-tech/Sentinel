@@ -8,6 +8,17 @@
   type InferSchema,
 } from "spacetimedb/server";
 import { Identity } from "spacetimedb";
+import {
+  validateRunRequest,
+  canTransition,
+  isAbandonedRun,
+  validateBenchValue,
+  runRetention,
+  validMeasurement,
+  rampStages,
+  ACTIVE_STATES,
+  type BenchState,
+} from "./benchmark";
 import { validateObservation, evaluate, fairEvictions } from "./rules";
 import {
   validateInvestigationStart,
@@ -166,6 +177,122 @@ const spacetimedb = schema({
       height: t.u32(),
       thumbnailDataUrl: t.string(),
       submittedBy: t.identity(),
+    },
+  ),
+  // ---- Fleet benchmark (isolated from rack telemetry and investigations) ----
+  // Identities allowed to run the external load generator. Private; admin-managed.
+  benchmarkRunnerAuthorization: table(
+    {},
+    { identity: t.identity().primaryKey(), label: t.string(), authorizedBy: t.identity(), createdAt: t.timestamp() },
+  ),
+  // Live runner connections (one row per registered control connection; removed on disconnect).
+  benchmarkRunner: table(
+    { public: true },
+    { connectionKey: t.string().primaryKey(), label: t.string(), connectedAt: t.timestamp() },
+  ),
+  benchmarkRun: table(
+    { public: true },
+    {
+      runId: t.u32().primaryKey().autoInc(),
+      mode: t.string(),
+      state: t.string(),
+      roverCount: t.u32(),
+      eventsPerRoverPerSecond: t.u32(),
+      durationSeconds: t.u32(),
+      subscriberCount: t.u32(),
+      requestedBy: t.identity(),
+      requestedAt: t.timestamp(),
+      startedAt: t.option(t.timestamp()),
+      finishedAt: t.option(t.timestamp()),
+      runnerConnection: t.string(),
+      runnerIdentity: t.option(t.identity()),
+      currentStage: t.u32(),
+      stageCount: t.u32(),
+      message: t.string(),
+      environmentJson: t.string(),
+    },
+  ),
+  // Per-stage results measured by the load generator (one row per completed stage).
+  benchmarkStage: table(
+    { public: true },
+    {
+      stageKey: t.string().primaryKey(),
+      runId: t.u32().index("btree"),
+      stageIndex: t.u32(),
+      roverCount: t.u32(),
+      targetRate: t.f64(),
+      startedElapsedMs: t.f64(),
+      endedElapsedMs: t.f64(),
+      sendWindowMs: t.f64(),
+      attempted: t.u64(),
+      acknowledged: t.u64(),
+      rejected: t.u64(),
+      transportErrors: t.u64(),
+      unresolved: t.u64(),
+      notSentBackpressure: t.u64(),
+      observedPairs: t.u64(),
+      expectedPairs: t.u64(),
+      duplicateObservations: t.u64(),
+      achievedRate: t.option(t.f64()),
+      ackP50: t.option(t.f64()),
+      ackP95: t.option(t.f64()),
+      ackP99: t.option(t.f64()),
+      ackSamples: t.u32(),
+      deliveryP50: t.option(t.f64()),
+      deliveryP95: t.option(t.f64()),
+      deliveryP99: t.option(t.f64()),
+      deliverySamples: t.u32(),
+      eventLoopP99Ms: t.option(t.f64()),
+      reportedAt: t.timestamp(),
+    },
+  ),
+  // Independent server-side evidence per stage: the change in SpacetimeDB's own transaction
+  // counters for bench_write (from its /v1/metrics endpoint), absent when unavailable.
+  benchmarkStageServer: table(
+    { public: true },
+    {
+      stageKey: t.string().primaryKey(),
+      runId: t.u32().index("btree"),
+      committedTxns: t.option(t.u64()),
+      failedTxns: t.option(t.u64()),
+      source: t.string(),
+    },
+  ),
+  // One row per measurement window (~1 s) while a run is in progress.
+  benchmarkSample: table(
+    { public: true },
+    {
+      sampleId: t.u64().primaryKey().autoInc(),
+      runId: t.u32().index("btree"),
+      stageIndex: t.u32(),
+      elapsedMs: t.f64(),
+      windowMs: t.f64(),
+      activeRovers: t.u32(),
+      activeSubscribers: t.u32(),
+      targetRate: t.f64(),
+      windowAcknowledged: t.u32(),
+      achievedRate: t.option(t.f64()),
+      deliveryP95: t.option(t.f64()),
+      deliverySamples: t.u32(),
+      ackP95: t.option(t.f64()),
+      totalAttempted: t.u64(),
+      totalAcknowledged: t.u64(),
+      totalRejected: t.u64(),
+      totalTransportErrors: t.u64(),
+      totalObservedPairs: t.u64(),
+      inFlight: t.u32(),
+    },
+  ),
+  // Append-only SIMULATED event stream. An event table: rows are delivered to subscribers in the
+  // transaction that inserts them and are not retained, so benchmark load never grows storage.
+  benchmarkEvent: table(
+    { public: true, event: true },
+    {
+      runId: t.u32(),
+      eventNo: t.u32(),
+      roverIndex: t.u32(),
+      roverSeq: t.u32(),
+      simulatedValue: t.f64(),
     },
   ),
 });
@@ -540,5 +667,291 @@ export const attachInvestigationImage = spacetimedb.reducer(
       uploadedAt: ctx.timestamp, // server time, not client-supplied
       submittedBy: ctx.sender,
     });
+  },
+);
+
+// ---- Fleet benchmark ----
+// The database validates, isolates and stores. All performance numbers come from the external
+// load generator's own instrumentation (scripts in benchmark/); none are produced here.
+
+type BenchRun = ReturnType<Ctx["db"]["benchmarkRun"]["iter"]> extends Iterable<infer R> ? R : never;
+const connectionKey = (ctx: Ctx) => ctx.connectionId?.toHexString() ?? "";
+const isBenchmarkRunner = (ctx: Ctx) => Boolean(ctx.db.benchmarkRunnerAuthorization.identity.find(ctx.sender));
+const parseIdentity = (hex: string) => {
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(hex)) throw new SenderError("Identity must be a 64-character hex identity");
+  return Identity.fromString(hex.replace(/^0x/, "").toLowerCase());
+};
+function setRunState(ctx: Ctx, run: BenchRun, state: BenchState, message: string) {
+  if (!canTransition(run.state, state)) throw new SenderError(`Run ${run.runId} cannot go from ${run.state} to ${state}`);
+  const terminal = !ACTIVE_STATES.includes(state);
+  ctx.db.benchmarkRun.runId.update({
+    ...run,
+    state,
+    message: message.slice(0, 500),
+    finishedAt: terminal ? ctx.timestamp : run.finishedAt,
+  });
+}
+function failAbandonedRuns(ctx: Ctx) {
+  for (const run of [...ctx.db.benchmarkRun.iter()]) {
+    const reason = isAbandonedRun(
+      {
+        state: run.state,
+        requestedMicros: run.requestedAt.microsSinceUnixEpoch,
+        startedMicros: run.startedAt?.microsSinceUnixEpoch ?? null,
+      },
+      ctx.timestamp.microsSinceUnixEpoch,
+    );
+    if (reason) setRunState(ctx, run, "FAILED", reason);
+  }
+}
+function deleteRun(ctx: Ctx, runId: number) {
+  for (const s of [...ctx.db.benchmarkStage.runId.filter(runId)]) ctx.db.benchmarkStage.stageKey.delete(s.stageKey);
+  for (const s of [...ctx.db.benchmarkSample.runId.filter(runId)]) ctx.db.benchmarkSample.sampleId.delete(s.sampleId);
+  for (const s of [...ctx.db.benchmarkStageServer.runId.filter(runId)]) ctx.db.benchmarkStageServer.stageKey.delete(s.stageKey);
+  ctx.db.benchmarkRun.runId.delete(runId);
+}
+/** The calling connection must be the registered runner that claimed this run. */
+function requireRunOwner(ctx: Ctx, runId: number): BenchRun {
+  const run = ctx.db.benchmarkRun.runId.find(runId);
+  if (!run) throw new SenderError("Unknown benchmark run");
+  if (!run.runnerIdentity || !run.runnerIdentity.isEqual(ctx.sender))
+    throw new SenderError("Only the runner that claimed this benchmark run can report for it");
+  return run;
+}
+function checkMeasurements(values: (number | undefined)[]) {
+  for (const v of values) if (!validMeasurement(v)) throw new SenderError("Measurements must be finite, non-negative or absent");
+}
+
+export const authorizeBenchmarkRunner = spacetimedb.reducer(
+  { runnerIdentity: t.string(), label: t.string() },
+  (ctx, { runnerIdentity, label }) => {
+    if (!isAdmin(ctx, ctx.sender)) throw new SenderError("Only the database admin can authorize a benchmark runner");
+    const identity = parseIdentity(runnerIdentity);
+    const row = { identity, label: label.trim().slice(0, 100) || "benchmark-runner", authorizedBy: ctx.sender, createdAt: ctx.timestamp };
+    if (ctx.db.benchmarkRunnerAuthorization.identity.find(identity)) ctx.db.benchmarkRunnerAuthorization.identity.update(row);
+    else ctx.db.benchmarkRunnerAuthorization.insert(row);
+  },
+);
+
+export const registerBenchmarkRunner = spacetimedb.reducer({ label: t.string() }, (ctx, { label }) => {
+  if (!isBenchmarkRunner(ctx)) throw new SenderError("This identity is not an authorized benchmark runner");
+  const key = connectionKey(ctx);
+  if (!key) throw new SenderError("A live connection is required");
+  const row = { connectionKey: key, label: label.trim().slice(0, 100) || "benchmark-runner", connectedAt: ctx.timestamp };
+  if (ctx.db.benchmarkRunner.connectionKey.find(key)) ctx.db.benchmarkRunner.connectionKey.update(row);
+  else ctx.db.benchmarkRunner.insert(row);
+});
+
+export const onClientDisconnected = spacetimedb.clientDisconnected((ctx) => {
+  const key = connectionKey(ctx);
+  if (!key || !ctx.db.benchmarkRunner.connectionKey.find(key)) return;
+  ctx.db.benchmarkRunner.connectionKey.delete(key);
+  for (const run of [...ctx.db.benchmarkRun.iter()])
+    if (run.runnerConnection === key && ACTIVE_STATES.includes(run.state as BenchState))
+      setRunState(ctx, run, "FAILED", "The benchmark runner disconnected before finishing; partial results are kept");
+});
+
+export const requestBenchmarkRun = spacetimedb.reducer(
+  {
+    mode: t.string(),
+    roverCount: t.u32(),
+    eventsPerRoverPerSecond: t.u32(),
+    durationSeconds: t.u32(),
+    subscriberCount: t.u32(),
+  },
+  (ctx, args) => {
+    try {
+      validateRunRequest(args);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    failAbandonedRuns(ctx);
+    const active = [...ctx.db.benchmarkRun.iter()].find((r) => ACTIVE_STATES.includes(r.state as BenchState));
+    if (active) throw new SenderError(`Benchmark run ${active.runId} is still ${active.state}; one run at a time`);
+    if (ctx.db.benchmarkRunner.count() === 0n)
+      throw new SenderError("No benchmark runner is connected. Start one with: npm run bench:runner");
+    ctx.db.benchmarkRun.insert({
+      runId: 0,
+      ...args,
+      state: "REQUESTED",
+      requestedBy: ctx.sender,
+      requestedAt: ctx.timestamp,
+      startedAt: undefined,
+      finishedAt: undefined,
+      runnerConnection: "",
+      runnerIdentity: undefined,
+      currentStage: 0,
+      stageCount: args.mode === "RAMP" ? rampStages(args.roverCount).length : 1,
+      message: "",
+      environmentJson: "{}",
+    });
+    const runs = [...ctx.db.benchmarkRun.iter()].map((r) => ({ runId: r.runId, state: r.state }));
+    for (const id of runRetention(runs)) deleteRun(ctx, id);
+  },
+);
+
+export const claimBenchmarkRun = spacetimedb.reducer(
+  { runId: t.u32(), environmentJson: t.string() },
+  (ctx, { runId, environmentJson }) => {
+    if (!isBenchmarkRunner(ctx)) throw new SenderError("This identity is not an authorized benchmark runner");
+    const key = connectionKey(ctx);
+    if (!ctx.db.benchmarkRunner.connectionKey.find(key)) throw new SenderError("Register this connection as a runner first");
+    const run = ctx.db.benchmarkRun.runId.find(runId);
+    if (!run) throw new SenderError("Unknown benchmark run");
+    if (run.state !== "REQUESTED") throw new SenderError(`Run ${runId} is ${run.state}, not REQUESTED`);
+    ctx.db.benchmarkRun.runId.update({
+      ...run,
+      state: "RUNNING",
+      startedAt: ctx.timestamp,
+      runnerConnection: key,
+      runnerIdentity: ctx.sender,
+      environmentJson: environmentJson.slice(0, 2000),
+    });
+  },
+);
+
+/** Anyone viewing the dashboard may stop the active run. Idempotent. */
+export const stopBenchmarkRun = spacetimedb.reducer({ runId: t.u32() }, (ctx, { runId }) => {
+  const run = ctx.db.benchmarkRun.runId.find(runId);
+  if (!run) throw new SenderError("Unknown benchmark run");
+  if (run.state === "REQUESTED") setRunState(ctx, run, "STOPPED", "Stopped before a runner started it");
+  else if (run.state === "RUNNING") setRunState(ctx, run, "STOP_REQUESTED", "Stop requested");
+});
+
+/** The benchmark write path: one SIMULATED event per call, delivered to subscribers, not stored. */
+export const benchWrite = spacetimedb.reducer(
+  { runId: t.u32(), eventNo: t.u32(), roverIndex: t.u32(), roverSeq: t.u32(), simulatedValue: t.f64() },
+  (ctx, args) => {
+    const run = ctx.db.benchmarkRun.runId.find(args.runId);
+    if (!run) throw new SenderError("Unknown benchmark run");
+    if (!run.runnerIdentity || !run.runnerIdentity.isEqual(ctx.sender))
+      throw new SenderError("Only the runner that claimed this benchmark run can write to it");
+    if (run.state !== "RUNNING" && run.state !== "STOP_REQUESTED")
+      throw new SenderError(`Benchmark run ${run.runId} is ${run.state}; writes are closed`);
+    if (args.roverIndex >= run.roverCount) throw new SenderError("Rover index outside this run's fleet");
+    try {
+      validateBenchValue(args.simulatedValue);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    ctx.db.benchmarkEvent.insert(args);
+  },
+);
+
+export const reportBenchmarkSample = spacetimedb.reducer(
+  {
+    runId: t.u32(),
+    stageIndex: t.u32(),
+    elapsedMs: t.f64(),
+    windowMs: t.f64(),
+    activeRovers: t.u32(),
+    activeSubscribers: t.u32(),
+    targetRate: t.f64(),
+    windowAcknowledged: t.u32(),
+    achievedRate: t.option(t.f64()),
+    deliveryP95: t.option(t.f64()),
+    deliverySamples: t.u32(),
+    ackP95: t.option(t.f64()),
+    totalAttempted: t.u64(),
+    totalAcknowledged: t.u64(),
+    totalRejected: t.u64(),
+    totalTransportErrors: t.u64(),
+    totalObservedPairs: t.u64(),
+    inFlight: t.u32(),
+  },
+  (ctx, args) => {
+    const run = requireRunOwner(ctx, args.runId);
+    if (!ACTIVE_STATES.includes(run.state as BenchState)) throw new SenderError(`Run ${run.runId} is ${run.state}`);
+    checkMeasurements([args.elapsedMs, args.windowMs, args.targetRate, args.achievedRate, args.deliveryP95, args.ackP95]);
+    if (args.totalAcknowledged > args.totalAttempted) throw new SenderError("Acknowledged cannot exceed attempted");
+    ctx.db.benchmarkSample.insert({
+      sampleId: 0n,
+      ...args,
+      achievedRate: args.achievedRate ?? undefined, // unmeasured stays absent
+      deliveryP95: args.deliveryP95 ?? undefined,
+      ackP95: args.ackP95 ?? undefined,
+    });
+    if (run.currentStage !== args.stageIndex) ctx.db.benchmarkRun.runId.update({ ...run, currentStage: args.stageIndex });
+  },
+);
+
+export const reportBenchmarkStage = spacetimedb.reducer(
+  {
+    runId: t.u32(),
+    stageIndex: t.u32(),
+    roverCount: t.u32(),
+    targetRate: t.f64(),
+    startedElapsedMs: t.f64(),
+    endedElapsedMs: t.f64(),
+    sendWindowMs: t.f64(),
+    attempted: t.u64(),
+    acknowledged: t.u64(),
+    rejected: t.u64(),
+    transportErrors: t.u64(),
+    unresolved: t.u64(),
+    notSentBackpressure: t.u64(),
+    observedPairs: t.u64(),
+    expectedPairs: t.u64(),
+    duplicateObservations: t.u64(),
+    achievedRate: t.option(t.f64()),
+    ackP50: t.option(t.f64()),
+    ackP95: t.option(t.f64()),
+    ackP99: t.option(t.f64()),
+    ackSamples: t.u32(),
+    deliveryP50: t.option(t.f64()),
+    deliveryP95: t.option(t.f64()),
+    deliveryP99: t.option(t.f64()),
+    deliverySamples: t.u32(),
+    eventLoopP99Ms: t.option(t.f64()),
+    serverCommitted: t.option(t.u64()),
+    serverFailed: t.option(t.u64()),
+    serverSource: t.string(),
+  },
+  (ctx, { serverCommitted, serverFailed, serverSource, ...args }) => {
+    const run = requireRunOwner(ctx, args.runId);
+    if (!ACTIVE_STATES.includes(run.state as BenchState)) throw new SenderError(`Run ${run.runId} is ${run.state}`);
+    if (args.stageIndex >= run.stageCount) throw new SenderError("Stage index outside this run");
+    checkMeasurements([
+      args.targetRate, args.startedElapsedMs, args.endedElapsedMs, args.sendWindowMs, args.achievedRate,
+      args.ackP50, args.ackP95, args.ackP99, args.deliveryP50, args.deliveryP95, args.deliveryP99, args.eventLoopP99Ms,
+    ]);
+    if (args.acknowledged + args.rejected + args.transportErrors + args.unresolved !== args.attempted)
+      throw new SenderError("Stage outcomes must add up to attempted writes");
+    if (args.observedPairs > args.expectedPairs) throw new SenderError("Observed deliveries cannot exceed expected deliveries");
+    const stageKey = `${args.runId}:${args.stageIndex}`;
+    const row = {
+      stageKey,
+      ...args,
+      achievedRate: args.achievedRate ?? undefined, // unmeasured stays absent
+      ackP50: args.ackP50 ?? undefined,
+      ackP95: args.ackP95 ?? undefined,
+      ackP99: args.ackP99 ?? undefined,
+      deliveryP50: args.deliveryP50 ?? undefined,
+      deliveryP95: args.deliveryP95 ?? undefined,
+      deliveryP99: args.deliveryP99 ?? undefined,
+      eventLoopP99Ms: args.eventLoopP99Ms ?? undefined,
+      reportedAt: ctx.timestamp,
+    };
+    if (ctx.db.benchmarkStage.stageKey.find(stageKey)) ctx.db.benchmarkStage.stageKey.update(row);
+    else ctx.db.benchmarkStage.insert(row);
+    const server = {
+      stageKey,
+      runId: args.runId,
+      committedTxns: serverCommitted ?? undefined,
+      failedTxns: serverFailed ?? undefined,
+      source: serverSource.slice(0, 200),
+    };
+    if (ctx.db.benchmarkStageServer.stageKey.find(stageKey)) ctx.db.benchmarkStageServer.stageKey.update(server);
+    else ctx.db.benchmarkStageServer.insert(server);
+  },
+);
+
+export const finishBenchmarkRun = spacetimedb.reducer(
+  { runId: t.u32(), state: t.string(), message: t.string() },
+  (ctx, { runId, state, message }) => {
+    const run = requireRunOwner(ctx, runId);
+    if (!["COMPLETED", "FAILED", "STOPPED"].includes(state)) throw new SenderError("Finish state must be COMPLETED, FAILED or STOPPED");
+    if (run.state === state) return; // idempotent retry
+    setRunState(ctx, run, state as BenchState, message);
   },
 );

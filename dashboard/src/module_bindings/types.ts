@@ -24,6 +24,115 @@ export const AgentAuthorization = __t.object("AgentAuthorization", {
 });
 export type AgentAuthorization = __Infer<typeof AgentAuthorization>;
 
+export const BenchmarkEvent = __t.object("BenchmarkEvent", {
+  runId: __t.u32(),
+  eventNo: __t.u32(),
+  roverIndex: __t.u32(),
+  roverSeq: __t.u32(),
+  simulatedValue: __t.f64(),
+});
+export type BenchmarkEvent = __Infer<typeof BenchmarkEvent>;
+
+export const BenchmarkRun = __t.object("BenchmarkRun", {
+  runId: __t.u32(),
+  mode: __t.string(),
+  state: __t.string(),
+  roverCount: __t.u32(),
+  eventsPerRoverPerSecond: __t.u32(),
+  durationSeconds: __t.u32(),
+  subscriberCount: __t.u32(),
+  requestedBy: __t.identity(),
+  requestedAt: __t.timestamp(),
+  startedAt: __t.option(__t.timestamp()),
+  finishedAt: __t.option(__t.timestamp()),
+  runnerConnection: __t.string(),
+  runnerIdentity: __t.option(__t.identity()),
+  currentStage: __t.u32(),
+  stageCount: __t.u32(),
+  message: __t.string(),
+  environmentJson: __t.string(),
+});
+export type BenchmarkRun = __Infer<typeof BenchmarkRun>;
+
+export const BenchmarkRunner = __t.object("BenchmarkRunner", {
+  connectionKey: __t.string(),
+  label: __t.string(),
+  connectedAt: __t.timestamp(),
+});
+export type BenchmarkRunner = __Infer<typeof BenchmarkRunner>;
+
+export const BenchmarkRunnerAuthorization = __t.object("BenchmarkRunnerAuthorization", {
+  identity: __t.identity(),
+  label: __t.string(),
+  authorizedBy: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type BenchmarkRunnerAuthorization = __Infer<typeof BenchmarkRunnerAuthorization>;
+
+export const BenchmarkSample = __t.object("BenchmarkSample", {
+  sampleId: __t.u64(),
+  runId: __t.u32(),
+  stageIndex: __t.u32(),
+  elapsedMs: __t.f64(),
+  windowMs: __t.f64(),
+  activeRovers: __t.u32(),
+  activeSubscribers: __t.u32(),
+  targetRate: __t.f64(),
+  windowAcknowledged: __t.u32(),
+  achievedRate: __t.option(__t.f64()),
+  deliveryP95: __t.option(__t.f64()),
+  deliverySamples: __t.u32(),
+  ackP95: __t.option(__t.f64()),
+  totalAttempted: __t.u64(),
+  totalAcknowledged: __t.u64(),
+  totalRejected: __t.u64(),
+  totalTransportErrors: __t.u64(),
+  totalObservedPairs: __t.u64(),
+  inFlight: __t.u32(),
+});
+export type BenchmarkSample = __Infer<typeof BenchmarkSample>;
+
+export const BenchmarkStage = __t.object("BenchmarkStage", {
+  stageKey: __t.string(),
+  runId: __t.u32(),
+  stageIndex: __t.u32(),
+  roverCount: __t.u32(),
+  targetRate: __t.f64(),
+  startedElapsedMs: __t.f64(),
+  endedElapsedMs: __t.f64(),
+  sendWindowMs: __t.f64(),
+  attempted: __t.u64(),
+  acknowledged: __t.u64(),
+  rejected: __t.u64(),
+  transportErrors: __t.u64(),
+  unresolved: __t.u64(),
+  notSentBackpressure: __t.u64(),
+  observedPairs: __t.u64(),
+  expectedPairs: __t.u64(),
+  duplicateObservations: __t.u64(),
+  achievedRate: __t.option(__t.f64()),
+  ackP50: __t.option(__t.f64()),
+  ackP95: __t.option(__t.f64()),
+  ackP99: __t.option(__t.f64()),
+  ackSamples: __t.u32(),
+  deliveryP50: __t.option(__t.f64()),
+  deliveryP95: __t.option(__t.f64()),
+  deliveryP99: __t.option(__t.f64()),
+  deliverySamples: __t.u32(),
+  eventLoopP99Ms: __t.option(__t.f64()),
+  reportedAt: __t.timestamp(),
+});
+export type BenchmarkStage = __Infer<typeof BenchmarkStage>;
+
+export const BenchmarkStageServer = __t.object("BenchmarkStageServer", {
+  stageKey: __t.string(),
+  runId: __t.u32(),
+  committedTxns: __t.option(__t.u64()),
+  failedTxns: __t.option(__t.u64()),
+  source: __t.string(),
+});
+export type BenchmarkStageServer = __Infer<typeof BenchmarkStageServer>;
+
 export const CurrentTelemetry = __t.object("CurrentTelemetry", {
   currentKey: __t.string(),
   rackId: __t.string(),

@@ -203,7 +203,7 @@ try {
       sourceIdentifier: source,
       observedAt: new Timestamp(BigInt(Date.now()) * 1000n),
     });
-  browser = await chromium.launch({ channel: "msedge", headless: true });
+  browser = await chromium.launch({ channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge", headless: true });
   const [ca, cb] = await Promise.all([
     browser.newContext({ viewport: { width: 1440, height: 1000 } }),
     browser.newContext({ viewport: { width: 1440, height: 1000 } }),
@@ -481,18 +481,17 @@ try {
   await expect(
     a.getByRole("heading", { name: "Fleet Simulation", exact: true }),
   ).toBeVisible();
-  await a.getByLabel("Virtual Rovers", { exact: true }).selectOption("5000");
-  await a
-    .getByLabel("Events per Rover per Second", { exact: true })
-    .selectOption("5");
-  await expect(a.locator(".target-rate")).toContainText("25,000");
-  await expect(
-    a.getByRole("button", { name: "Start Simulation", exact: true }),
-  ).toBeDisabled();
-  await expect(
-    a.getByRole("button", { name: "Stop Simulation", exact: true }),
-  ).toBeDisabled();
-  await expect(a.getByText("Not measured", { exact: true })).toHaveCount(3);
+  // Fleet benchmark contract: the target is configuration, never a measurement; the achieved
+  // rate is "Not measured" unless a run is active (measured results come from benchmark rows).
+  await a.getByRole("radio", { name: "Fixed Load" }).click();
+  await a.getByLabel("Rover count", { exact: true }).selectOption("5000");
+  await a.getByLabel("Events per rover per second", { exact: true }).selectOption("5");
+  await expect(a.getByTestId("target-rate")).toContainText("25,000");
+  if ((await a.getByTestId("bench-state").getAttribute("data-state")) !== "Running")
+    await expect(a.getByTestId("achieved-rate")).toHaveText("Not measured");
+  await expect(a.getByRole("button", { name: /Start Fixed Load/ })).toBeVisible();
+  await expect(a.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  await expect(a.getByTestId("bench-metrics").locator("[data-metric]")).toHaveCount(6);
   await expect(a.locator(".telemetry-card")).toHaveCount(0);
   await a.setViewportSize({ width: 1440, height: 1000 });
   await a.screenshot({ path: output + "fleet-desktop.png", fullPage: true });

@@ -10,3 +10,4 @@ Use TypeScript and the pinned spacetimedb 2.14.1 SDK. The default schema export 
 - Schema changes must be additive (new tables) so existing databases migrate without data loss.
 - Advance current values only for strictly newer observation timestamps. Evaluate alerts against current values.
 - Run root npm test, npm run typecheck, npm run db:build, and the isolated integration/browser checks before merging.
+- Fleet benchmark tables (`benchmark_*`) are isolated from rack telemetry and investigations. `benchmark_event` is an event table (delivered, never stored); never subscribe dashboard clients to it. Only the runner that claimed a run (`benchmark_runner_authorization`) may write its events or measurements. The module validates and stores measurements but never computes or invents performance numbers.

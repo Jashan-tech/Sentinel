@@ -9,8 +9,8 @@
   "scripts": {
     "dev": "npm run dev -w dashboard",
     "build": "npm run build -w dashboard",
-    "typecheck": "tsc -p spacetimedb && tsc -p dashboard && tsc -p scripts",
-    "test": "tsx --test spacetimedb/tests/*.test.ts",
+    "typecheck": "tsc -p spacetimedb && tsc -p dashboard && tsc -p scripts && tsc -p benchmark",
+    "test": "tsx --test spacetimedb/tests/*.test.ts benchmark/tests/*.test.ts",
     "test:integration": "tsx scripts/integration.ts",
     "test:browser": "tsx scripts/browser.ts",
     "db:start": "node scripts/spacetime.mjs start --listen-addr 127.0.0.1:3000 --data-dir .spacetime --non-interactive",
@@ -22,7 +22,11 @@
     "test:vision-e2e": "tsx scripts/vision-e2e.ts",
     "test:equipment-e2e": "tsx scripts/equipment-e2e.ts",
     "test:mission-control": "tsx scripts/mission-control-e2e.ts",
-    "agent:register": "node scripts/register-agent.mjs"
+    "agent:register": "node scripts/register-agent.mjs",
+    "bench": "tsx benchmark/src/main.ts",
+    "bench:runner": "tsx benchmark/src/main.ts --serve",
+    "bench:register": "node scripts/register-agent.mjs --benchmark",
+    "test:bench-live": "tsx scripts/benchmark-live.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
