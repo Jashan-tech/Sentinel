@@ -574,6 +574,14 @@ Decide the next step.`;
       next = needsVerification ? "verification" : "finish";
       objective = needsVerification ? "Independently check the specialist findings against the data before the report is written." : "";
     }
+    // Reserve the last delegation for verification when it is required (seen live: the budget was
+    // spent on specialists and verification never ran).
+    const verificationRequired = (policySeverity !== "NORMAL" || images.length > 0) && state.verificationRuns === 0;
+    if (next !== "finish" && next !== "verification" && verificationRequired && state.delegations === opts.maxDelegations - 1) {
+      emit("GUARD", `Last delegation reserved for verification (Supervisor wanted ${next})`, "INFO", { agent: "supervisor" });
+      next = "verification";
+      objective = "Independently check the specialist findings against the data before the report is written.";
+    }
     if (next === "finish" && images.length && !visionRan && state.delegations < opts.maxDelegations) {
       next = "vision";
       objective = "Inspect the operator-supplied photograph and report what is directly visible.";

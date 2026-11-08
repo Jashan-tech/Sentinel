@@ -1,6 +1,6 @@
 # SENTINEL Agent: Multi-Agent Nemotron Investigation (Feature 2)
 
-A standalone HTTP service. POST it a rack snapshot and a team of NVIDIA Nemotron agents investigates the rack. A **Supervisor** plans the investigation and hands tasks to **Telemetry**, **Environment**, **Documentation** and **Verification** agents. Each of those agents runs its own Nemotron calls with its own read-only tools. LangGraph routes between them using shared state. The response is a Zod-validated diagnostic report plus a timeline of what actually ran.
+A standalone HTTP service. POST it a rack snapshot, optionally with a photo, and a team of NVIDIA Nemotron agents investigates the rack. A **Supervisor** plans the investigation and hands tasks to **Telemetry**, **Environment**, **Documentation**, **Vision** and **Verification** agents. Each of those agents runs its own Nemotron calls with its own read-only tools. LangGraph routes between them using shared state. The response is a Zod-validated diagnostic report plus a timeline of what actually ran.
 
 The service does not depend on SpacetimeDB or the dashboard.
 
@@ -14,6 +14,9 @@ npm run dev                       # http://localhost:3001  POST /investigate
 npm run demo                      # live multi-agent run: normal, critical, stale, contradictory
 npm run demo -- c-critical        # one scenario (fixture-name prefix; b2-profile = profile demo)
 npm run demo -- --single          # original single-agent engine
+npm run demo -- c-critical --image rack-switches-patch-panels.jpg               # telemetry + real photo
+npm run demo -- a-normal --image switch-5port-led-closeup.jpg --visual-only     # photo only
+npx tsx scripts/probe-vision.ts test-assets/vision/<file>                       # raw multimodal probe
 npm test && npm run typecheck
 npm run probe -- nvidia/<model-id>   # check a model's tool calling on your key
 ```
@@ -27,6 +30,7 @@ npm run probe -- nvidia/<model-id>   # check a model's tool calling on your key
 | `NVIDIA_API_KEY` | required | Without it, `/investigate` returns a 500 with a clear message |
 | `NVIDIA_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Supervisor model (Nemotron Super) |
 | `NVIDIA_SPECIALIST_MODEL` | same as `NVIDIA_MODEL` | Model for the specialist and verification agents. `nvidia/nemotron-3.5-lightning-30b-a3b` also supports tool calling on our key |
+| `NVIDIA_VISION_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` | Multimodal model for the Vision Agent, and for Verification when a photo is attached. It must accept `image_url` input |
 | `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NVIDIA's OpenAI-compatible endpoint |
 | `MAX_DELEGATIONS` | `5` (hard cap 5) | Number of specialist and verification runs per investigation |
 | `MAX_SPECIALIST_TOOL_ROUNDS` | `3` (hard cap 3) | Tool rounds per agent run |
@@ -67,7 +71,8 @@ START -> supervisor --(next = telemetry | environment | documentation | verifica
 | `telemetry` | own Nemotron tool loop (≤3 rounds) | current telemetry, history, rack profile | `SpecialistFinding` |
 | `environment` | own Nemotron tool loop | current telemetry, history | `SpecialistFinding` |
 | `documentation` | own Nemotron tool loop | `lookup_equipment_documentation`, rack profile | `SpecialistFinding` |
-| `verification` | own Nemotron tool loop; spot-checks claims against the data | current telemetry, history | `VerificationResult` (may request a follow-up) |
+| `vision` | one multimodal Nemotron VL call with the actual image as an `image_url` data URL, plus one repair attempt | none (works from the image) | `SpecialistFinding` + `visual_findings[]` |
+| `verification` | own Nemotron tool loop; spot-checks claims against the data, and looks at the image itself when Vision ran | current telemetry, history | `VerificationResult` (may request a follow-up) |
 | `final` | Nemotron Super synthesis | none | `MultiAgentReport` |
 
 **Shared state.** The graph state holds the request, plan, current decision, assignments, specialist findings, the verification result, how many delegations and verification runs have happened, which limits were hit, and any fatal error. Each agent receives a digest of the earlier findings. The Supervisor sees all findings and the verification feedback before every decision.
@@ -75,7 +80,9 @@ START -> supervisor --(next = telemetry | environment | documentation | verifica
 **Guards.** These are code rules. Each time one fires, a `GUARD` event appears in the timeline.
 - Limits on delegations, verification retries and total time stop the investigation and mark the report `INCOMPLETE`.
 - The Supervisor cannot finish before any agent has looked at the data.
-- A rack that is not clearly NORMAL must go through verification before the investigation finishes.
+- A rack that is not clearly NORMAL, or any investigation with a photo, must go through verification. The last delegation is reserved for it.
+- Vision is offered only when an image is attached. An attached image cannot be skipped, and Vision is never repeated.
+- An identical task for the same agent is never re-run. In a live test the Supervisor reissued one documentation task three times.
 - The final severity comes from the profile thresholds applied to fresh readings. The Supervisor is told this value before it writes the report.
 
 **Output errors.** If any agent or the Supervisor returns malformed JSON, it gets one repair attempt. If the repair also fails, that result is marked `INCOMPLETE`. Nothing is fabricated in its place.
@@ -165,6 +172,32 @@ The report keeps different kinds of information in separate fields:
 | Unavailable evidence | `missing_information` |
 
 Each entry in `events` has the form `{ type, timestamp, agent?, tool?, description, status }`. `type` is one of START, SUPERVISOR, AGENT, TOOL, VERIFY, GUARD, REPORT, ERROR or END, and `status` is SUCCESS, ERROR or INFO. Events are recorded while the graph runs, and they never contain model reasoning text.
+
+### Images (Feature 4)
+
+Optional request fields:
+
+```jsonc
+"images": [{                         // at most 1
+  "image_id": "img-…",               // optional; generated if omitted
+  "filename": "rack.jpg",
+  "mime_type": "image/jpeg",         // or image/png; must match the actual bytes
+  "data_base64": "…",                // ≤ 4 MB decoded, ≤ 4096 px per side
+  "source_type": "MANUAL_UPLOAD" | "ONLINE_REFERENCE" | "ROVER_CAMERA",
+  "capture_timestamp": "ISO" | null, // only when actually known; never inferred
+  "source_url": "https://…" | null,  // metadata only; never fetched
+  "attribution": "…" | null, "license": "…" | null
+}],
+"inspection_mode": "TELEMETRY" | "VISUAL" | "COMBINED"   // informs the Supervisor
+```
+
+- **Validation:** `src/images.ts` checks the real JPEG or PNG signature, reads the dimensions from the header, rejects truncated files and enforces the limits. The checks fail with `400`; a request body that is too large fails with `413`. `?mode=single` combined with images is a `400`.
+- **Provenance:** the server computes the SHA-256 of the received bytes and the upload time. `report.evidence.images[]` holds the provenance, and `report.visual_findings[]` holds every visual finding with its `image_id`.
+- **What each finding contains:** `observation`, `component`, `image_location`, `category` (EQUIPMENT, PORT, CABLE, LABEL, LED, PHYSICAL_IRREGULARITY, OBSTRUCTION or OTHER), `visual_evidence`, `certainty` (CERTAIN or UNCERTAIN), `potential_concern`, `limitations` and `recommended_follow_up`. There are no confidence scores.
+- **What leaves the server:** image bytes are sent only to NVIDIA for inference and never appear in the report.
+- **Prompt injection:** the Vision and Verification prompts state that text inside an image is data, never instructions.
+
+The test photos are in [`test-assets/vision/`](test-assets/vision/): six Wikimedia Commons images, `manifest.json` with each one's license, creator and hash, and a human review guide.
 
 `POST /investigate?mode=single` runs the original single-agent engine. It returns the original `DiagnosticReport` without the multi-agent fields.
 

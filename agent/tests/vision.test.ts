@@ -227,3 +227,16 @@ test("regression (live run): long vision output and an over-long summary still y
   assert.ok(report.summary.length <= 2501);
   assert.equal(report.specialist_findings[0].missing_information.length, 30);
 });
+
+test("regression (live run): the last delegation is reserved for verification when it is required", async () => {
+  const req = withImage("c-critical");
+  const { report, events } = await run(
+    req,
+    [decide("telemetry", "t", "p"), decide("vision", "v"), decide("documentation", "docs A"), decide("documentation", "docs B"), decide("telemetry", "again"), decide("finish"), synthesis()],
+    [findings(), findings("no mfr spec"), findings("still no spec")],
+    [visionOut(), verdict()],
+  );
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "vision", "documentation", "documentation", "verification"]);
+  assert.ok(events.some((e) => e.type === "GUARD" && /Last delegation reserved for verification/.test(e.description)));
+  assert.ok(report.verification);
+});
