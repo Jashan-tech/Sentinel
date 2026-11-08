@@ -104,23 +104,23 @@ export function extractJson(text: string): unknown {
   try {
     return JSON.parse(body);
   } catch (err) {
-    // Two objects back to back ("{...}{...}" or "{...}\n{...}"): use the first complete one.
+    // Common model slips (an extra object, a missing/trailing comma, unquoted or single-quoted keys,
+    // a cut-off tail, prose after the JSON) are repaired locally instead of costing another 10-20 s
+    // model round trip. Candidates go from narrowest (the first complete object) to widest; only a
+    // plain object is accepted, and it still goes through the same strict schema validation.
     const first = firstBalancedObject(cleaned, start);
-    if (first) {
-      try {
-        return JSON.parse(first);
-      } catch {
-        // fall through to local repair
+    const candidates = [first, body, cleaned.slice(start)].filter((c): c is string => Boolean(c));
+    for (const c of candidates) {
+      for (const attempt of [() => JSON.parse(c), () => JSON.parse(jsonrepair(c))]) {
+        try {
+          const v = attempt();
+          if (v && typeof v === "object" && !Array.isArray(v)) return v;
+        } catch {
+          // try the next candidate
+        }
       }
     }
-    // Common model slips (a missing comma, a trailing comma, an unescaped quote, a cut-off tail) are
-    // repaired locally instead of costing another 10-20 s model round trip. The repaired object still
-    // goes through the same strict schema validation, so nothing unvalidated gets through.
-    try {
-      return JSON.parse(jsonrepair(cleaned.slice(start)));
-    } catch {
-      throw err;
-    }
+    throw err;
   }
 }
 

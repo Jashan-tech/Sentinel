@@ -15,6 +15,8 @@ export interface AgentConfig {
   specialistModel: string;
   maxDelegations: number;
   maxSpecialistToolRounds: number;
+  /** Verification checks every agent's findings, so it gets its own (larger) tool-round budget. */
+  maxVerificationToolRounds: number;
   maxVerificationRetries: number;
   maxInvestigationSeconds: number;
   /** Budget when an image is supplied: Vision plus mandatory multimodal verification need more time. */
@@ -49,7 +51,8 @@ export function loadConfig(): AgentConfig {
     model,
     specialistModel: process.env.NVIDIA_SPECIALIST_MODEL?.trim() || model,
     maxDelegations: Math.min(intEnv("MAX_DELEGATIONS", 5), 5),
-    maxSpecialistToolRounds: Math.min(intEnv("MAX_SPECIALIST_TOOL_ROUNDS", 3), 3),
+    maxSpecialistToolRounds: Math.min(intEnv("MAX_SPECIALIST_TOOL_ROUNDS", 4), 4),
+    maxVerificationToolRounds: Math.min(intEnv("MAX_VERIFICATION_TOOL_ROUNDS", 5), 6),
     maxVerificationRetries: Math.min(intEnv("MAX_VERIFICATION_RETRIES", 1, 0), 1),
     maxInvestigationSeconds: intEnv("MAX_INVESTIGATION_SECONDS", 90),
     maxVisualInvestigationSeconds: intEnv("MAX_VISUAL_INVESTIGATION_SECONDS", 130),

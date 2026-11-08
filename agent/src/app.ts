@@ -183,6 +183,7 @@ export function createApp(deps: AppDeps = {}) {
             staleAfterMinutes,
             maxDelegations: config.maxDelegations,
             maxSpecialistToolRounds: config.maxSpecialistToolRounds,
+            maxVerificationToolRounds: config.maxVerificationToolRounds,
             maxVerificationRetries: config.maxVerificationRetries,
             maxInvestigationSeconds: images.length
               ? Math.max(config.maxInvestigationSeconds, config.maxVisualInvestigationSeconds ?? 0)

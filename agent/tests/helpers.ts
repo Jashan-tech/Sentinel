@@ -77,6 +77,7 @@ export const testConfig: AgentConfig = {
   specialistModel: "fake-nemotron-specialist",
   maxDelegations: 5,
   maxSpecialistToolRounds: 3,
+  maxVerificationToolRounds: 5,
   maxVerificationRetries: 1,
   maxInvestigationSeconds: 90,
   maxVisualInvestigationSeconds: 130,

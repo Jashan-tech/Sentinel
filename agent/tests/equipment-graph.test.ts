@@ -95,16 +95,17 @@ test("actual tool loops connect Telemetry, Documentation, real-photo Vision and 
   const multi = new AIMessage({
     content: "",
     tool_calls: [
+      // The verifier spot-checks samples; trends and documentation reach it as code-computed evidence.
       {
-        name: "analyze_telemetry_trends",
+        name: "get_telemetry_history",
         args: { rack_id: req.rack_id, metric_type: "AMBIENT_TEMPERATURE_C" },
-        id: "trend-verify",
+        id: "history-verify",
         type: "tool_call",
       },
       {
-        name: "lookup_equipment_documentation",
-        args: { equipment_type: req.equipment_type },
-        id: "doc-verify",
+        name: "get_current_telemetry",
+        args: { rack_id: req.rack_id },
+        id: "current-verify",
         type: "tool_call",
       },
     ],
@@ -200,7 +201,7 @@ test("actual tool loops connect Telemetry, Documentation, real-photo Vision and 
   );
   assert(
     report.tool_calls
-      .filter((t) => t.tool === "analyze_telemetry_trends")
+      .filter((t) => t.tool === "analyze_telemetry_trends" || t.agent === "verification")
       .every((t) => t.status === "SUCCESS"),
   );
   assert(

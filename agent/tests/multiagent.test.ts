@@ -87,7 +87,8 @@ test("agent-specific tool permissions", async () => {
   assert.deepEqual(names("telemetry"), ["analyze_telemetry_trends", "get_current_telemetry", "get_early_warning_indicators", "get_rack_profile", "get_telemetry_history"]);
   assert.deepEqual(names("environment"), ["get_current_telemetry", "get_telemetry_history"]);
   assert.deepEqual(names("documentation"), ["get_rack_profile", "lookup_equipment_documentation"]);
-  assert.deepEqual(names("verification"), ["analyze_telemetry_trends", "get_current_telemetry", "get_early_warning_indicators", "get_rack_profile", "get_telemetry_history", "lookup_equipment_documentation"]);
+  // The verifier gets thresholds, trends, indicators and documentation as code-computed evidence; it only spot-checks.
+  assert.deepEqual(names("verification"), ["get_current_telemetry", "get_telemetry_history"]);
 
   const req = fixture("a-normal");
   const { report } = await run(

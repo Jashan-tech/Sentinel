@@ -306,4 +306,11 @@ These changes measured live on Rack 01, the busiest demo rack:
 
 - **Parallel specialists:** the Supervisor can list independent specialists in `also`, and the `team` node runs them in parallel. Delegation budget, duplicate and repeat guards still apply, and verification always runs separately.
 - **Shorter specialist answers:** at most 6 observations of under 35 words each, and at most 3 hypotheses. Long answers were both slow to generate and frequently malformed JSON.
+- **Verification that finishes:** verification used to end INCOMPLETE most of the time on busy racks, because it re-fetched data it had already been given and ran out of tool rounds. Now:
+  - It gets the thresholds, current readings, trends, indicators and documentation lookup as code-computed evidence, plus its own 5-round budget. Its only tools are current readings and history, for spot checks.
+  - An INCOMPLETE verification is not repeated over the same findings. A FAILED one, such as a transient model error, can still be retried.
+  - Contradictions must be statements that cannot both be true; overstatements count as unsupported claims.
+  - Specialists may only call data "missing" if their own tool reported it missing.
+  - Result, live on the busiest rack: 5 of 6 runs COMPLETED and VERIFIED in 22–52 s.
+- **Routing robustness:** routing slips are normalised instead of failing the run. These include several agents in `next`, synonyms, other key names and a wrapped decision. An invalid `also` entry is dropped.
 - **Local JSON repair:** common model slips are repaired with `jsonrepair` (and a "first complete object" pass), then validated by the same strict schemas, instead of a 10–20 s repair round trip to the model.

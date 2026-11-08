@@ -337,8 +337,51 @@ export const SPECIALISTS = [
 export const AgentName = z.enum([...SPECIALISTS, "verification"]);
 export type AgentName = z.infer<typeof AgentName>;
 
+const ParallelTask = z.object({
+  agent: z.enum(["telemetry", "environment", "documentation"]),
+  objective: z.string().min(1).transform((v) => v.slice(0, 600)),
+});
+const ROUTES = ["telemetry", "environment", "documentation", "vision", "verification", "finish"] as const;
+const ROUTE_SYNONYMS: Record<string, string> = {
+  verify: "verification", verifier: "verification", docs: "documentation", documents: "documentation",
+  env: "environment", done: "finish", stop: "finish", complete: "finish", end: "finish", none: "finish",
+};
+const route = (v: unknown): string | null => {
+  const t = String(v ?? "").trim().toLowerCase().replace(/[^a-z]/g, "");
+  const r = ROUTE_SYNONYMS[t] ?? t;
+  return (ROUTES as readonly string[]).includes(r) ? r : null;
+};
+/**
+ * Normalise common model slips in the routing decision instead of rejecting it (seen live twice:
+ * "next" naming several agents). Several agents become `next` + `also`; synonyms map to routes.
+ * Anything still unrecognisable is left as is and fails validation as before.
+ */
+function normalizeDecision(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  let d = { ...(raw as Record<string, unknown>) };
+  // Wrapped ({"decision": {...}}) or a differently named routing key (seen live: no "next" at all).
+  if (d.next === undefined && d.decision && typeof d.decision === "object" && !Array.isArray(d.decision))
+    d = { ...d, ...(d.decision as Record<string, unknown>) };
+  if (d.next === undefined)
+    for (const k of ["next_agent", "nextAgent", "agent", "action", "route", "delegate_to", "delegate", "next_step", "target"])
+      if (d[k] !== undefined && typeof d[k] !== "object") {
+        d.next = d[k];
+        break;
+      }
+  const parts: unknown[] = Array.isArray(d.next) ? d.next : typeof d.next === "string" ? d.next.split(/\s*(?:,|\+|&|\/|\band\b)\s*/i) : [d.next];
+  const valid = parts.map(route).filter((r): r is string => r !== null);
+  if (!valid.length) return d;
+  d.next = valid[0];
+  const extra = valid.slice(1).filter((r) => r === "telemetry" || r === "environment" || r === "documentation");
+  if (extra.length) {
+    const also = Array.isArray(d.also) ? [...d.also] : [];
+    for (const agent of extra) also.push({ agent, objective: String(d.objective ?? "") || `Investigate as part of: ${String(d.reason ?? "the plan")}` });
+    d.also = also;
+  }
+  return d;
+}
 /** Supervisor routing decision (written by the Supervisor model). */
-export const SupervisorDecision = z.object({
+export const SupervisorDecision = z.preprocess(normalizeDecision, z.object({
   plan: z
     .string()
     .nullish()
@@ -347,11 +390,19 @@ export const SupervisorDecision = z.object({
   objective: cappedOptText(600),
   reason: cappedOptText(600),
   /** Independent specialists to run IN PARALLEL with `next` (speed). Ignored unless `next` is a data specialist. */
+  // Lenient by design: an entry naming another agent (seen live: "verification") is dropped instead of
+  // invalidating the whole routing decision.
   also: z
-    .array(z.object({ agent: z.enum(["telemetry", "environment", "documentation"]), objective: cappedOptText(600) }))
+    .array(z.unknown())
     .nullish()
-    .transform((v) => (v ?? []).slice(0, 2)),
-});
+    .transform((v) =>
+      (v ?? [])
+        .map((x) => ParallelTask.safeParse(x))
+        .filter((r) => r.success)
+        .map((r) => r.data!)
+        .slice(0, 2),
+    ),
+}));
 export type SupervisorDecision = z.infer<typeof SupervisorDecision>;
 
 /** What a specialist model writes. */

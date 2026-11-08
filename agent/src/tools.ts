@@ -151,7 +151,11 @@ export function createSnapshotDataSource(
         throw new Error(
           "Equipment type must match this investigation snapshot",
         );
-      return lookupDocumentation(equipmentType, topic, snap.equipment_identity);
+      const r = lookupDocumentation(equipmentType, topic, snap.equipment_identity);
+      // When the operator applied a documented range, the project note "thresholds are fictional" no longer
+      // describes this rack and would contradict the profile's provenance.
+      if (snap.profile.threshold_source) r.documents = r.documents.filter((d) => d.doc_id !== "SENTINEL-DEMO-PROFILES");
+      return r;
     },
     getCurrentTelemetry(rackId, metricType) {
       checkRack(rackId);

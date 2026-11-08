@@ -52,3 +52,16 @@ test("tools: threshold provenance in profile and trends follows the applied sour
   const demo = createSnapshotDataSource(InvestigationRequest.parse(raw), { staleAfterMinutes: 15 });
   assert.equal((demo.getRackProfile(raw.rack_id) as any).threshold_provenance, "FICTIONAL_DEMO_CONFIGURATION");
 });
+
+test("documentation: the 'thresholds are fictional' project note is not returned once a documented range is applied", () => {
+  const raw = rawFixture("c-critical");
+  const ident = { manufacturer: "Cisco", model: "UCS C220 M7", provenance: "OPERATOR_PROVIDED" as const, assertion: "assigned" };
+  const doc = InvestigationRequest.parse({ ...raw, equipment_type: "Compute", equipment_identity: ident,
+    profile: { ...raw.profile, temperature_warning_c: 35, temperature_critical_c: 35, threshold_source: source } });
+  const ids = (r: any) => r.documents.map((d: any) => d.doc_id);
+  const withSource = createSnapshotDataSource(doc, { staleAfterMinutes: 15 }).lookupDocumentation("Compute", "temperature") as any;
+  assert.ok(!ids(withSource).includes("SENTINEL-DEMO-PROFILES"));
+  assert.ok(ids(withSource).includes("CISCO-C220-M7-ENV"));
+  const demo = InvestigationRequest.parse({ ...raw, equipment_type: "Compute" });
+  assert.ok(ids(createSnapshotDataSource(demo, { staleAfterMinutes: 15 }).lookupDocumentation("Compute", "temperature")).includes("SENTINEL-DEMO-PROFILES"));
+});

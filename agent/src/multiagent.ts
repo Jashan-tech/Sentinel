@@ -55,6 +55,8 @@ export interface MultiAgentOptions {
   staleAfterMinutes: number;
   maxDelegations: number;
   maxSpecialistToolRounds: number;
+  /** Tool rounds for the Verification Agent (defaults to maxSpecialistToolRounds). */
+  maxVerificationToolRounds?: number;
   maxVerificationRetries: number;
   maxInvestigationSeconds: number;
   /** Validated images (Feature 4). Absent/empty = telemetry-only, Vision is never offered. */
@@ -105,7 +107,9 @@ Keep it SHORT: at most 6 observations (one distinct fact each, under 35 words; m
 3 hypotheses with at most 3 evidence items per list, at most 4 missing_information items.
 Each observation must quote the value, unit, metric, source_identifier, observed_at, and say SIMULATED or REAL.
 Hypotheses are possibilities, not confirmed faults. No confidence percentages.
-Report only what YOUR tools returned for YOUR objective. Do not copy other agents' observations or hypotheses;
+Report only what YOUR tools returned for YOUR objective. Never claim that data is missing or absent unless one of
+YOUR OWN tools reported it missing; other agents may be working in parallel with tools you do not have.
+Do not copy other agents' observations or hypotheses;
 refer to them only to agree or disagree with specific evidence.`;
 
 const AGENT_PROMPTS: Record<AgentName, string> = {
@@ -158,8 +162,11 @@ Give 3-10 visual_findings. Be concise.`,
 
   verification: `You are the VERIFICATION AGENT of SENTINEL, an independent reviewer.
 You receive findings written by other agents. Do NOT restate them; judge them.
-- Code-computed thresholds, trends, early-warning indicators and the documentation match are given to you; they are authoritative. Check trend claims against them; call analyze_telemetry_trends only for a source they do not cover. Spot-check specific readings with current telemetry/history, and manufacturer citations with lookup_equipment_documentation. Reject numerical calculations or model identities not supported by this evidence or your tools.
-- Flag claims not supported by tool data, root-cause claims stated as fact, and contradictions between agents or with the data.
+- Code-computed thresholds (with provenance), current readings, trends, early-warning indicators and the documentation lookup are given to you; they are authoritative. Judge threshold, trend, indicator and citation claims against them directly. Use get_current_telemetry / get_telemetry_history only to spot-check specific readings or samples. Reject numerical calculations or model identities not supported by this evidence.
+- Work efficiently: decide threshold, trend, indicator and documentation-match claims directly from the code-computed evidence, without tools. Use tools only for claims it does not cover, and request several tool calls in the same round.
+- Flag claims not supported by tool data and root-cause claims stated as fact in unsupported_claims.
+- contradictions: ONLY pairs of statements that cannot both be true (agent vs agent, or agent vs data). An overstated,
+  speculative or poorly worded claim is NOT a contradiction; put it in unsupported_claims.
 - List evidence that is missing for the conclusions drawn.
 - Only list a claim in verified_findings if the tool data supports it.
 - Set request_more_investigation to true only if a specific specialist could close an important gap with the data
@@ -380,7 +387,9 @@ export function createAgentToolsets(
     telemetry: [current, history, profile, trends, indicators],
     environment: [current, history],
     documentation: [docs, profile],
-    verification: [current, history, profile, trends, indicators, docs],
+    // Thresholds, trends, indicators and documentation are given to the verifier as code-computed evidence;
+    // re-fetching them is what exhausted its tool budget live. It keeps only spot-check tools.
+    verification: [current, history],
     vision: [], // Vision works from the image itself, not from data tools.
   };
 }
@@ -600,6 +609,8 @@ export async function runMultiAgentInvestigation(
       new SystemMessage(AGENT_PROMPTS[agent]),
       new HumanMessage({ content: userContent as HumanMessage["content"] }),
     ];
+    const roundLimit =
+      agent === "verification" ? (opts.maxVerificationToolRounds ?? opts.maxSpecialistToolRounds) : opts.maxSpecialistToolRounds;
     const records: AgentToolCallRecord[] = [];
     let rounds = 0;
     let status: SpecialistFinding["status"] = "COMPLETED";
@@ -612,7 +623,7 @@ export async function runMultiAgentInvestigation(
         if (
           (resp.invalid_tool_calls?.length ?? 0) > 0 &&
           calls.length === 0 &&
-          rounds < opts.maxSpecialistToolRounds
+          rounds < roundLimit
         ) {
           emit(
             "AGENT",
@@ -634,7 +645,7 @@ export async function runMultiAgentInvestigation(
           break;
         }
         if (
-          rounds >= opts.maxSpecialistToolRounds ||
+          rounds >= roundLimit ||
           remaining() < FINAL_RESERVE_MS
         ) {
           status = "INCOMPLETE";
@@ -884,16 +895,24 @@ Decide the next step.`;
       try {
         decision = SupervisorDecision.parse(extractJson(text));
       } catch (err) {
+        // Say exactly what the model wrote for the routing fields so slips can be diagnosed from the timeline.
+        let got = "";
+        try {
+          const raw = extractJson(text) as Record<string, unknown>;
+          got = ` got keys=${JSON.stringify(Object.keys(raw)).slice(0, 120)} next=${JSON.stringify(raw.next)?.slice(0, 80)} also=${JSON.stringify(raw.also)?.slice(0, 120)}`;
+        } catch {
+          got = ` unparseable output: ${JSON.stringify(text.slice(0, 120))}`;
+        }
         emit(
           "SUPERVISOR",
-          `Supervisor returned an invalid decision (${errMsg(err).slice(0, 120)}); requesting one repair`,
+          `Supervisor returned an invalid decision (${errMsg(err).replace(/\s+/g, " ").slice(0, 160)};${got}); requesting one repair`,
           "ERROR",
           { agent: "supervisor" },
         );
         msgs.push(
           new AIMessage(text.slice(0, 2000) || "(empty)"),
           new HumanMessage(
-            `Invalid decision (${errMsg(err).slice(0, 300)}). Reply with ONLY the JSON object.`,
+            `Invalid decision (${errMsg(err).replace(/\s+/g, " ").slice(0, 300)}). "next" must be exactly one of telemetry, environment, documentation, vision, verification, finish; put other specialists in "also". Reply with ONLY the JSON object.`,
           ),
         );
       }
@@ -945,6 +964,18 @@ Decide the next step.`;
       unverified(state).length === 0
     ) {
       emit("GUARD", "No new findings since the last completed verification; not re-running it", "INFO", { agent: "supervisor" });
+      next = "finish";
+      objective = "";
+    }
+    // An INCOMPLETE verification re-run over the same findings hits the same limit again and burns the
+    // last delegation (seen live: verification(INCOMPLETE) -> verification(INCOMPLETE) -> MAX_DELEGATIONS).
+    if (
+      next === "verification" &&
+      state.verificationRuns > 0 &&
+      state.verificationResult?.status === "INCOMPLETE" && // FAILED (e.g. a transient model error) may still be retried
+      unverified(state).length === 0
+    ) {
+      emit("GUARD", "Verification already ran on these findings and could not finish; not repeating it with the same evidence", "INFO", { agent: "supervisor" });
       next = "finish";
       objective = "";
     }
@@ -1209,6 +1240,31 @@ Decide the next step.`;
   }
 
   // ---- Verification ----
+  // Compact, code-compiled evidence handed to the verifier so it rarely needs tools.
+  const currentDigest = (() => {
+    try {
+      const r = opts.dataSource.getCurrentTelemetry(request.rack_id) as { readings?: any[]; missing_metrics?: string[] };
+      return {
+        readings: (r.readings ?? []).map((x) => ({
+          metric: x.metric_type, value: x.numeric_value, unit: x.unit, source: x.source_identifier,
+          observed_at: x.observed_at, stale: x.stale, simulated: x.simulated,
+        })),
+        missing: r.missing_metrics ?? [],
+      };
+    } catch {
+      return { readings: [], missing: [] };
+    }
+  })();
+  const docDigest = (documentationMatch.documents ?? []).map((d: any) => ({
+    doc_id: d.doc_id,
+    source_type: d.source_type,
+    verified: d.verified,
+    ...(d.supported_models ? { model: d.supported_models, section: d.section, source_url: d.source_url } : {}),
+    ...(d.technical_facts ? { facts: d.technical_facts.map((f: any) => f.statement) } : {}),
+    ...(d.content ? { content: String(d.content).slice(0, 400) } : {}),
+    ...(d.availability ? { availability: d.availability } : {}),
+  }));
+
   async function verificationNode(state: S): Promise<Partial<S>> {
     const objective =
       state.decision?.objective || "Verify the specialist findings.";
@@ -1218,8 +1274,10 @@ Decide the next step.`;
     const verifyText = `${rackHeader}\nObjective: ${objective}
 Code-computed evidence (authoritative; computed deterministically from the snapshot, not by any agent):
 configured thresholds: ${JSON.stringify(evidence.configured_thresholds)}
-monitoring: ${monitoringCompact}
-Use tools only for claims this evidence does not cover (specific readings or samples, documentation citations, another source).
+current readings: ${JSON.stringify(currentDigest)}
+monitoring (trends + early-warning indicators): ${monitoringCompact}
+documentation lookup (match ${documentationMatch.match_status}): ${JSON.stringify(docDigest)}
+Your only tools are get_current_telemetry and get_telemetry_history, for spot-checking specific readings or samples. Everything else above is authoritative; do not try to re-derive it.
 Findings to review:\n${findingsDigest(state.findings, null)}`;
     const withImage =
       images.length > 0 &&
