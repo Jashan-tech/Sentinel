@@ -104,7 +104,9 @@ export default function RackView({
   }
   function simulationControl(m: (typeof metrics)[number]): ReactNode {
     const reading = current.find((r) => r.metricType === m.id);
-    const editable = !reading || reading.sourceType === "SIMULATOR";
+    // Demo: a simulated value may replace a rover reading (the newer reading becomes current; the
+    // rover's reading stays in history). Only ROVER is overridable; other physical sources stay protected.
+    const editable = !reading || reading.sourceType === "SIMULATOR" || reading.sourceType === "ROVER";
     const value = drafts[m.id] ?? (reading ? String(reading.numericValue) : "");
     const sliderMax =
       m.id === "SOUND_RAW"
@@ -190,6 +192,11 @@ export default function RackView({
         {!editable && (
           <small className="warning-text">
             Physical-source reading protected. Simulation cannot overwrite it.
+          </small>
+        )}
+        {reading?.sourceType === "ROVER" && (
+          <small className="muted">
+            Current value is a live rover reading; Apply replaces it with a simulated one.
           </small>
         )}
       </form>
