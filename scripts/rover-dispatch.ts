@@ -588,8 +588,7 @@ const ORBIT_MAX_STEPS = Number(env("ROVER_ORBIT_MAX_STEPS", "6"));
 
 async function turnDeg(dir: "left" | "right", deg: number) {
   const ms = Math.max(80, Math.min(700, Math.round(deg * MS_PER_DEG)));
-  const sp = dir === "right" ? TURN_SPEED : -TURN_SPEED;
-  await driveLR(sp, -sp, ms);
+  await turn(dir, ms); // recorded in the trail so the way home includes it
   await sleep(350);
 }
 
@@ -792,7 +791,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await showView("front", "front of the rack", "Front of the rack: solid panel, no wiring visible.", false);
   log("Front of the rack: solid panel, no wiring visible. Checking the left side.");
   await sleep(ROUTE.pauseMs);
-  const centre = trail.length;
+  const centreMark = trail.length;
 
   // left side
   checkAbort();
@@ -800,6 +799,8 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("left", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
+  phase("aiming at the box", rackId);
+  await centre("left side", "right"); // turn in small steps until the box is centred
   phase("inspecting the left side", rackId);
   await showView("left side", "left side of the rack", "Left side: no exposed wires on this side.", false);
   log("Left side: no exposed wires on this side.");
@@ -809,7 +810,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   checkAbort();
   phase("going back to the front", rackId);
   log("Going back to the front.");
-  while (trail.length > centre) { await undoLast(); await sleep(300); }
+  while (trail.length > centreMark) { await undoLast(); await sleep(300); }
   await sleep(500);
 
   // right side
@@ -819,6 +820,9 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
   await turn("left", degMs(ROUTE.faceDeg)); await sleep(500);
+  phase("aiming at the box", rackId);
+  const aim = await centre("right side", "left"); // centre the box before the photo
+  if (!aim.rack_visible) log("Warning: the box is not clearly in view; taking the photo anyway.");
   phase("taking photo", rackId);
   await showView("right side", "open rack with exposed cabling (TARGET)", "Right side: exposed wiring found. Taking the inspection photo.", true);
   log("Right side: exposed wiring found. Taking the inspection photo.");
