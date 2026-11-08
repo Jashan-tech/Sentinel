@@ -10,6 +10,20 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const AdminAccount = __t.object("AdminAccount", {
+  identity: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type AdminAccount = __Infer<typeof AdminAccount>;
+
+export const AgentAuthorization = __t.object("AgentAuthorization", {
+  identity: __t.identity(),
+  label: __t.string(),
+  authorizedBy: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type AgentAuthorization = __Infer<typeof AgentAuthorization>;
+
 export const CurrentTelemetry = __t.object("CurrentTelemetry", {
   currentKey: __t.string(),
   rackId: __t.string(),
@@ -42,6 +56,21 @@ export const Investigation = __t.object("Investigation", {
 });
 export type Investigation = __Infer<typeof Investigation>;
 
+export const InvestigationCompletion = __t.object("InvestigationCompletion", {
+  investigationId: __t.string(),
+  rackId: __t.string(),
+  kind: __t.string(),
+  recordedBy: __t.identity(),
+  recordedAt: __t.timestamp(),
+});
+export type InvestigationCompletion = __Infer<typeof InvestigationCompletion>;
+
+export const InvestigationExpiry = __t.object("InvestigationExpiry", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type InvestigationExpiry = __Infer<typeof InvestigationExpiry>;
+
 export const InvestigationImage = __t.object("InvestigationImage", {
   investigationId: __t.string(),
   rackId: __t.string(),
@@ -62,6 +91,12 @@ export const InvestigationImage = __t.object("InvestigationImage", {
   submittedBy: __t.identity(),
 });
 export type InvestigationImage = __Infer<typeof InvestigationImage>;
+
+export const ModuleSetting = __t.object("ModuleSetting", {
+  key: __t.string(),
+  value: __t.string(),
+});
+export type ModuleSetting = __Infer<typeof ModuleSetting>;
 
 export const Rack = __t.object("Rack", {
   rackId: __t.string(),

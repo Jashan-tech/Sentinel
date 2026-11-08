@@ -3,6 +3,7 @@
  * Documentation, Vision and Verification agents (each its own Nemotron call loop with its own tools
  * or, for Vision, the actual image) over a single shared-state LangGraph.
  */
+import { createHash } from "node:crypto";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import {
   AIMessage,
@@ -220,6 +221,20 @@ Rules:
   them separate from measured telemetry. A visual observation is never a confirmed fault or cause.`;
 
 // ---------------------------------------------------------------- helpers
+
+/** Evidence identity of one reading: id (when known), provenance, value, unit and both timestamps. */
+export const readingKey = (m: any) =>
+  JSON.stringify([
+    m.observation_id ?? null,
+    m.metric_type,
+    m.source_type,
+    m.source_identifier,
+    m.simulated,
+    m.numeric_value,
+    m.unit,
+    m.observed_at,
+    m.ingested_at,
+  ]);
 
 /** Contradictions the verifier actually reported (live models sometimes list "No contradiction ..." entries). */
 export const realContradictions = (v: { contradictions: string[] }) =>
@@ -440,23 +455,33 @@ export async function runMultiAgentInvestigation(
     }
     if (r?.error) return;
     for (const m of r.readings ?? []) {
-      const k = `m|${m.metric_type}|${m.source_identifier}|${m.observed_at}`;
+      // The full reading identity: provenance + value + both timestamps (+ id when known).
+      // Distinct valid readings never collapse; the same reading returned twice is kept once.
+      const k = `m|${readingKey(m)}`;
       if (!seen.has(k)) seen.add(k) && evidence.measurements.push(m);
     }
-    if (r.available === true && Array.isArray(r.observations)) {
-      const k = `h|${r.metric_type}|${r.returned}`;
+    if (r.available === true && Array.isArray(r.observations) && r.observations.length) {
+      // History is identified by its actual observation window and contents, not its size.
+      const windowId = createHash("sha256")
+        .update(JSON.stringify([r.metric_type, ...r.observations.map(readingKey)]))
+        .digest("hex")
+        .slice(0, 16);
+      const k = `h|${windowId}`;
       if (!seen.has(k)) {
         seen.add(k);
         evidence.history.push({
+          window_id: windowId,
           metric_type: r.metric_type,
           observations: r.returned,
           order: r.order,
           from: r.observations[0]?.observed_at,
           to: r.observations.at(-1)?.observed_at,
           stats: r.stats,
+          observation_ids: r.observations.map((o: any) => o.observation_id ?? null),
           source_identifiers: [
             ...new Set(r.observations.map((o: any) => o.source_identifier)),
           ],
+          source_types: [...new Set(r.observations.map((o: any) => o.source_type))],
           simulated: r.observations.every((o: any) => o.simulated),
         });
       }
@@ -1329,8 +1354,14 @@ Decide the next step.`;
         if (invented.length)
           emit("GUARD", `Ignored ${invented.length} "verified" finding(s) from the synthesis that the Verification Agent did not accept`, "INFO", { agent: "supervisor" });
         const kept = syn.hypotheses.filter((h) => !a.unsupported_claims.some((c) => sameClaim(h.description, c)));
-        if (kept.length < syn.hypotheses.length)
-          emit("GUARD", `Removed ${syn.hypotheses.length - kept.length} hypothesis(es) that restated claims verification marked unsupported`, "INFO", { agent: "supervisor" });
+        const removed = syn.hypotheses.filter((h) => !kept.includes(h));
+        if (removed.length)
+          emit(
+            "GUARD",
+            `Removed ${removed.length} hypothesis(es) that restated claims verification marked unsupported: ${removed.map((h) => `"${h.description.slice(0, 120)}"`).join("; ")}`,
+            "INFO",
+            { agent: "supervisor" },
+          );
         const status = a.investigation_status;
         report = MultiAgentReport.parse({
           ...base,

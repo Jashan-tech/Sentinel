@@ -79,6 +79,122 @@ function until(db: DbConnection, condition: () => boolean) {
   });
 }
 let checks = 0;
+const server = "http://127.0.0.1:3000";
+async function sql(query: string): Promise<Record<string, any>[]> {
+  const res = await fetch(`${server}/v1/database/${database}/sql`, { method: "POST", body: query });
+  if (!res.ok) throw new Error(`SQL ${res.status}: ${await res.text()}`);
+  const [{ schema, rows }] = (await res.json()) as any[];
+  const names = schema.elements.map((e: any) => e.name.some);
+  return rows.map((r: unknown[]) => Object.fromEntries(names.map((n: string, i: number) => [n, r[i]])));
+}
+/** Call a reducer as the CLI (database publisher / admin) identity. */
+function asAdmin(reducer: string, ...args: unknown[]) {
+  return execFileSync(spacetimeCli(), ["call", database, reducer, ...args.map((x) => JSON.stringify(x)), "--server", server], { encoding: "utf8", stdio: "pipe" });
+}
+async function rejects(p: Promise<unknown>, re: RegExp) {
+  await assert.rejects(p, (e: Error) => (re.test(String(e?.message ?? e)) ? true : assert.fail(`expected ${re}, got ${e?.message ?? e}`)));
+}
+const agentReport = (rackId: string, extra: object = {}) => ({
+  rack_id: rackId, investigation_status: "COMPLETED", severity: "NORMAL", summary: "INTEGRATION TEST: scripted report.",
+  hypotheses: [], recommended_next_inspection: [], tool_calls: [], agents_invoked: [], specialist_findings: [],
+  verified_findings: [], missing_information: [], limits_reached: [], unsupported_claims: [], evidence: {},
+  verification_outcome: "NOT_REQUIRED", incomplete_reasons: [], ...extra,
+});
+const completion = (id: string, r: Record<string, unknown>) => ({
+  investigationId: id, status: String(r.investigation_status), severity: String(r.severity), reportJson: JSON.stringify(r), eventsJson: "[]",
+});
+const row = async (id: string) => (await sql(`SELECT * FROM investigation WHERE investigation_id = '${id}'`))[0];
+const kind = async (id: string) => (await sql(`SELECT * FROM investigation_completion WHERE investigation_id = '${id}'`))[0]?.kind;
+
+/** Issues 5, 7 and 10 against the real backend. `agent` is authorized by the admin; `browser` is not. */
+async function investigationTrustChecks(agent: DbConnection, browser: DbConnection) {
+  asAdmin("claim_admin");
+  asAdmin("authorize_agent", agent.identity!.toHexString(), "integration-agent");
+  const id = () => crypto.randomUUID();
+  const start = (who: DbConnection, investigationId: string) =>
+    who.reducers.startInvestigation({ investigationId, rackId: "rack-2", snapshotJson: '{"rack_id":"rack-2"}' });
+  try {
+    const inv1 = id();
+    await start(browser, inv1);
+    await rejects(browser.reducers.completeInvestigation(completion(inv1, agentReport("rack-2"))), /authorized agent/);
+    check("forged completion from a browser identity is rejected", () => {});
+    await rejects(agent.reducers.completeInvestigation(completion(inv1, agentReport("rack-1"))), /does not match investigated rack/);
+    check("report for a different rack is rejected", () => {});
+    await rejects(
+      agent.reducers.completeInvestigation(completion(inv1, agentReport("rack-2", { verification_outcome: "NOT_GROUNDED" }))),
+      /requires VERIFIED/,
+    );
+    check("COMPLETED report with unsuccessful verification is rejected", () => {});
+    const good = completion(inv1, agentReport("rack-2"));
+    await agent.reducers.completeInvestigation(good);
+    const r1 = await row(inv1);
+    const k1 = await kind(inv1);
+    check("authorized agent records the report; provenance is AGENT", () => {
+      assert.equal(r1.status, "COMPLETED");
+      assert.equal(k1, "AGENT");
+    });
+    await agent.reducers.completeInvestigation(good); // identical retry
+    await rejects(agent.reducers.completeInvestigation({ ...good, reportJson: JSON.stringify(agentReport("rack-2", { summary: "changed" })) }), /already COMPLETED/);
+    await browser.reducers.abandonInvestigation({ investigationId: inv1, reason: "late" }); // no-op
+    check("terminal transitions are idempotent; a different second completion is rejected", () => {});
+    assert.equal((await row(inv1)).report_json, good.reportJson, "stored report unchanged");
+
+    const inv2 = id();
+    await start(browser, inv2);
+    await rejects(agent.reducers.abandonInvestigation({ investigationId: inv2, reason: "x" }), /started an investigation/);
+    await browser.reducers.abandonInvestigation({ investigationId: inv2, reason: "Agent service is unreachable" });
+    await browser.reducers.abandonInvestigation({ investigationId: inv2, reason: "again" });
+    const r2 = await row(inv2);
+    assert.equal(r2.status, "FAILED");
+    assert.equal(r2.severity, "UNKNOWN");
+    assert.equal(JSON.parse(r2.report_json).diagnosis, null);
+    assert.equal(await kind(inv2), "CLIENT_ABANDONED");
+    await rejects(agent.reducers.completeInvestigation(completion(inv2, agentReport("rack-2"))), /already FAILED/);
+    check("only the starter can abandon; abandoned runs are FAILED/UNKNOWN with no diagnosis; late agent results are refused", () => {});
+    await rejects(start(browser, inv2), /already exists/);
+    check("duplicate investigation ids are rejected", () => {});
+
+    // Durable recovery (issue 7): RUNNING rows past the timeout are expired by the database.
+    asAdmin("set_running_timeout", 1);
+    const inv3 = id();
+    await start(browser, inv3);
+    await new Promise((r) => setTimeout(r, 2200));
+    const inv4 = id();
+    await start(browser, inv4); // also sweeps this rack
+    const r3 = await row(inv3);
+    assert.equal(r3.status, "FAILED");
+    assert.match(JSON.parse(r3.report_json).error, /No completion was recorded/);
+    assert.equal(await kind(inv3), "DATABASE_EXPIRED");
+    const schedule = execFileSync(spacetimeCli(), ["sql", "--server", server, database, "SELECT * FROM investigation_expiry"], { encoding: "utf8" });
+    assert.match(schedule, /Interval|interval|\d/);
+    check("stale RUNNING investigations are expired by the database; the periodic sweep is scheduled", () => {});
+    asAdmin("set_running_timeout", 300);
+    await browser.reducers.abandonInvestigation({ investigationId: inv4, reason: "cleanup" });
+
+    // Retention (issue 10): bounded per-rack history; RUNNING rows are never deleted.
+    const running = id();
+    await start(browser, running);
+    for (let i = 0; i < 22; i++) {
+      const x = id();
+      await start(browser, x);
+      await browser.reducers.abandonInvestigation({ investigationId: x, reason: "retention test" });
+    }
+    const rack2 = await sql("SELECT * FROM investigation WHERE rack_id = 'rack-2'");
+    const runningRows = rack2.filter((r) => r.status === "RUNNING").length;
+    assert.ok(rack2.length <= 20 + runningRows && rack2.length - runningRows <= 20, `rack-2 keeps ${rack2.length} investigations (${runningRows} running)`);
+    assert.ok(rack2.some((r) => r.investigation_id === running && r.status === "RUNNING"), "RUNNING row retained");
+    const orphanImages = await sql("SELECT * FROM investigation_completion WHERE rack_id = 'rack-2'");
+    assert.ok(orphanImages.every((c) => rack2.some((r) => r.investigation_id === c.investigation_id)), "no orphaned completion rows");
+    await browser.reducers.abandonInvestigation({ investigationId: running, reason: "cleanup" });
+    check("per-rack investigation history is bounded (20) and RUNNING rows are kept", () => {});
+
+    await rejects(browser.reducers.authorizeAgent({ agentIdentity: browser.identity!.toHexString(), label: "me" }), /admin/);
+    await rejects(browser.reducers.claimAdmin({}), /already has an admin/);
+    check("non-admin identities cannot authorize agents or claim admin", () => {});
+  } finally {
+    asAdmin("revoke_agent", agent.identity!.toHexString());
+  }
+}
 function check(label: string, fn: () => void) {
   fn();
   checks++;
@@ -293,6 +409,11 @@ try {
     assert.equal(a.db.recentObservation.count(), 50n);
     assert.equal(b.db.recentObservation.count(), 50n);
   });
+  check("fair eviction: a fast SOUND_RAW burst does not erase other metrics' recent history (issue 9)", () => {
+    const metrics = new Set([...a.db.recentObservation.iter()].map((r) => r.metricType));
+    assert.ok(metrics.has("SOUND_RAW"));
+    assert.ok(metrics.size > 1, `only ${[...metrics].join(",")} left in recent history`);
+  });
   const cli = spacetimeCli();
   const output = execFileSync(
     cli,
@@ -322,12 +443,22 @@ try {
       assert.equal(row[7][0], "0x" + first.submittedBy.toHexString());
       assert.equal(BigInt(row[8][0]), first.observedAt.microsSinceUnixEpoch);
       assert.equal(BigInt(row[9][0]), first.ingestedAt.microsSinceUnixEpoch);
-      assert.equal(
-        b.db.recentObservation.observationId.find(first.observationId),
-        null,
-      );
+      // With fair eviction (issue 9) the first temperature reading may stay in the window; the rows
+      // that were evicted are the oldest SOUND_RAW burst rows. They must all remain in the archive.
     },
   );
+  {
+    const archivedSound = JSON.parse(
+      execFileSync(cli, ["sql", "--server", "http://127.0.0.1:3000", "--format", "json", database,
+        "SELECT observation_id FROM telemetry_observation WHERE rack_id = 'rack-1' AND metric_type = 'SOUND_RAW'"], { encoding: "utf8" }),
+    )[0].rows.map((r: unknown[]) => String(r[0]));
+    const recentSound = new Set([...b.db.recentObservation.iter()].filter((r) => r.metricType === "SOUND_RAW").map((r) => r.observationId.toString()));
+    const evicted = archivedSound.filter((x: string) => !recentSound.has(x));
+    check("rows evicted from the recent window remain in the immutable archive", () => {
+      assert.ok(evicted.length >= 1, "the 51-reading burst must have evicted something");
+      assert.ok(archivedSound.length >= 51);
+    });
+  }
   const count = execFileSync(
     cli,
     [
@@ -344,6 +475,7 @@ try {
     rackId: "rack-1",
     profileId: "standard",
   });
+  await investigationTrustChecks(a, b);
   console.log(
     `${checks} integration checks passed; starting recent count ${baseline}. Database: ${database}`,
   );

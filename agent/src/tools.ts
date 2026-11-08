@@ -32,10 +32,12 @@ export interface RackDataSource {
     limit?: number,
   ): unknown;
   getRackProfile(rackId: string): unknown;
-  getTelemetryTrends(rackId: string, metricType?: MetricType): MetricTrend[];
+  /** sourceIdentifier filters the input BEFORE the per-metric source-series cap. */
+  getTelemetryTrends(rackId: string, metricType?: MetricType, sourceIdentifier?: string): MetricTrend[];
   getEarlyWarnings(
     rackId: string,
     metricType?: MetricType,
+    sourceIdentifier?: string,
   ): EarlyWarningIndicator[];
   lookupDocumentation(
     equipmentType: string,
@@ -99,6 +101,19 @@ export function createSnapshotDataSource(
   snap.as_of = asOf.toISOString();
   const trends = analyzeTrends(snap, opts.staleAfterMinutes);
   const indicators = earlyWarnings(snap, trends, opts.staleAfterMinutes);
+  // Per-source analysis on a source-filtered snapshot, so the 8-series cap never hides a requested source.
+  const bySource = new Map<string, { trends: MetricTrend[]; indicators: EarlyWarningIndicator[] }>();
+  const forSource = (sourceIdentifier: string) => {
+    let hit = bySource.get(sourceIdentifier);
+    if (!hit) {
+      const only = (rs: TelemetryReading[]) => rs.filter((r) => r.source_identifier === sourceIdentifier);
+      const sub: InvestigationRequest = { ...snap, current_telemetry: only(snap.current_telemetry), recent_telemetry: only(snap.recent_telemetry) };
+      const t = analyzeTrends(sub, opts.staleAfterMinutes);
+      hit = { trends: t, indicators: earlyWarnings(sub, t, opts.staleAfterMinutes) };
+      bySource.set(sourceIdentifier, hit);
+    }
+    return hit;
+  };
   const stale = opts.staleAfterMinutes;
 
   const checkRack = (rackId: string) => {
@@ -110,16 +125,18 @@ export function createSnapshotDataSource(
   };
 
   return {
-    getTelemetryTrends(rackId, metricType) {
+    getTelemetryTrends(rackId, metricType, sourceIdentifier) {
       checkRack(rackId);
+      const src = sourceIdentifier ? forSource(sourceIdentifier).trends : trends;
       return structuredClone(
-        trends.filter((t) => !metricType || t.metric_type === metricType),
+        src.filter((t) => !metricType || t.metric_type === metricType),
       );
     },
-    getEarlyWarnings(rackId, metricType) {
+    getEarlyWarnings(rackId, metricType, sourceIdentifier) {
       checkRack(rackId);
+      const src = sourceIdentifier ? forSource(sourceIdentifier).indicators : indicators;
       return structuredClone(
-        indicators.filter((i) => !metricType || i.metric === metricType),
+        src.filter((i) => !metricType || i.metric === metricType),
       );
     },
     lookupDocumentation(equipmentType, topic) {
@@ -266,16 +283,7 @@ export function createTools(ds: RackDataSource) {
     tool(
       ({ rack_id, metric_type, source_identifier }) =>
         run(() => ({
-          trends: ds
-            .getTelemetryTrends(rack_id, metric_type)
-            .map((t) => ({
-              ...t,
-              series: t.series.filter(
-                (s) =>
-                  !source_identifier ||
-                  s.source_identifier === source_identifier,
-              ),
-            })),
+          trends: ds.getTelemetryTrends(rack_id, metric_type, source_identifier),
           source_identifier_filter: source_identifier ?? null,
         })),
       {
@@ -297,10 +305,11 @@ export function createTools(ds: RackDataSource) {
       ({ rack_id, metric_type, source_identifier }) =>
         run(() => ({
           indicators: ds
-            .getEarlyWarnings(rack_id, metric_type)
+            .getEarlyWarnings(rack_id, metric_type, source_identifier)
             .filter(
               (i) =>
                 !source_identifier ||
+                i.observed_evidence.source_identifier == null ||
                 i.observed_evidence.source_identifier === source_identifier,
             ),
           source_identifier_filter: source_identifier ?? null,

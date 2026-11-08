@@ -46,6 +46,8 @@ npm run probe -- nvidia/<model-id>   # check a model's tool calling on your key
 | `NVIDIA_ENABLE_THINKING` | `false` | Sets `chat_template_kwargs.enable_thinking`. Reasoning text is never returned |
 | `STALE_AFTER_MINUTES` | `15` | A current reading older than this, relative to `as_of`, is marked stale |
 | `PORT` | `3001` | |
+| `SPACETIME_AGENT_TOKEN` | none | The agent's own SpacetimeDB identity token, written by `npm run agent:register`. Without it, recorded (dashboard) investigations return 503 |
+| `SPACETIME_DATABASE` / `SPACETIME_URL` | `sentinel` / `http://127.0.0.1:3000` | Where reports are recorded |
 
 **Why `@langchain/openai`?** There is no JavaScript `@langchain/nvidia-ai-endpoints` package; it exists only for Python. NVIDIA's hosted API is OpenAI-compatible and supports `tools`, so we use `ChatOpenAI` with its base URL set to NVIDIA's endpoint. The models are still Nemotron.
 
@@ -100,7 +102,21 @@ START -> supervisor --(next = telemetry | environment | documentation | verifica
 
 ### `POST /investigate`
 
-Request (validated by `InvestigationRequest` in `src/schemas.ts`):
+There are two modes.
+
+**Recorded mode (used by the dashboard).** Request body: `{ "investigation_id": "<uuid>", "images": [ ... ] }`.
+- The agent loads the **stored** snapshot for that `RUNNING` investigation from SpacetimeDB.
+- It checks that each image's SHA-256 matches the provenance recorded for the investigation.
+- It runs the investigation and records the report itself with `complete_investigation`, under its authorized identity.
+- The response adds `persisted: true`, or `persisted: false` with `persist_error`.
+- It keeps running if the browser disconnects.
+- Error codes: 404 for an unknown investigation, 409 if it isn't running, 400 for an image mismatch or invalid stored snapshot, 503 if the agent isn't registered.
+
+**Stateless mode (CLI demo and tests).** The full request below. Nothing is recorded, and the run is cancelled if the client disconnects.
+
+Every model call has an enforced deadline: an `AbortSignal` combining the call's own budget, the investigation's hard stop (budget plus 15 s) and caller cancellation.
+
+Stateless request (validated by `InvestigationRequest` in `src/schemas.ts`):
 
 ```jsonc
 {
@@ -124,9 +140,11 @@ Request (validated by `InvestigationRequest` in `src/schemas.ts`):
 Every `TelemetryReading` field is required:
 
 - `metric_type`: one of `AMBIENT_TEMPERATURE_C`, `RELATIVE_HUMIDITY_PERCENT`, `SOUND_RAW`, `ULTRASONIC_DISTANCE_CM`. Any other metric is rejected.
-- `numeric_value`, `unit`, `source_type`, `source_identifier`
-- `observed_at`, `ingested_at`: ISO datetimes
-- `simulated`
+- `numeric_value` and `unit`: the same units and ranges as the database (`°C` −50 to 100, `%RH` 0 to 100, `raw` ≥ 0, `cm` ≥ 0). Anything else is rejected, never converted.
+- `source_type`: `SIMULATOR`, which is the only source the database authorizes. `source_identifier`: 1 to 100 characters, not blank.
+- `observed_at`, `ingested_at`: ISO datetimes, from 2000 onward. `observed_at` may be at most 30 s after `ingested_at`, and neither may be more than 30 s after `as_of`.
+- `simulated`: must be `true` exactly when `source_type` is `SIMULATOR`.
+- An `observation_id` that appears twice must describe the same reading.
 
 Response codes:
 
@@ -162,9 +180,19 @@ Report (`MultiAgentReport`). The original single-agent fields come first and the
     "configured_thresholds": { "...": "...", "provenance": "FICTIONAL_DEMO_CONFIGURATION" },
     "documentation": [ { "doc_id", "title", "source_type", "verified", "availability" } ]
   },
-  "limits_reached": []                    // e.g. MAX_DELEGATIONS, MAX_INVESTIGATION_SECONDS
+  "limits_reached": [],                   // e.g. MAX_DELEGATIONS, MAX_INVESTIGATION_SECONDS, VERIFICATION_TIMEOUT
+  "verification_required": true,          // a photo was supplied, severity isn't NORMAL, or there is an early-warning trend
+  "verification_outcome": "VERIFIED|NOT_GROUNDED|INCOMPLETE|FAILED|NOT_RUN|NOT_REQUIRED",
+  "unsupported_claims": ["from the latest verification; never upgraded by the synthesis"],
+  "incomplete_reasons": ["why the status is not COMPLETED"]
 }
 ```
+
+These fields are computed by code from what actually happened, never written by a model:
+- **`investigation_status`** is `COMPLETED` only when every agent completed, no limit was reached, and required verification is `VERIFIED`.
+- **`verification_outcome`** is `NOT_GROUNDED` when the verifier says `grounded: false` or reports any unresolved contradiction. Entries such as "No contradiction…" are ignored.
+- **`verified_findings`** contains only claims that the latest *completed* verification accepted and didn't also reject. Any "verified" items the final synthesis adds are ignored, and hypotheses that restate an unsupported claim are removed. Both actions appear as `GUARD` events.
+- **The verification gate.** When a photo is supplied, a fixed gate step before the final report sends any unverified findings to Verification, outside the delegation and retry caps. If time runs out, it records `VERIFICATION_TIMEOUT`.
 
 The report keeps different kinds of information in separate fields:
 
