@@ -442,7 +442,7 @@ async function patrol(db: DbConnection) {
 
 // ---------------- quick look (Nemotron VL, thinking off, ~2 s) ----------------
 type View = "OPEN_RACK_CABLES" | "CLOSED_DOOR_RACK" | "BLANK_PANEL" | "NO_RACK";
-interface Look { view: View; rack_visible: boolean; full_rack_visible: boolean; wires_visible: boolean; reason: string }
+interface Look { view: View; rack_visible: boolean; full_rack_visible: boolean; wires_visible: boolean; reason: string; x: number | null; w: number | null }
 const VIEW_LABEL: Record<View, string> = {
   OPEN_RACK_CABLES: "open rack with exposed cabling (TARGET)",
   CLOSED_DOOR_RACK: "rack behind a closed mesh door",
@@ -451,12 +451,15 @@ const VIEW_LABEL: Record<View, string> = {
 };
 const LOOK_PROMPT =
   "You are the eyes of a data-center inspection rover. Classify this camera frame and answer ONLY with JSON: " +
-  '{"view": "OPEN_RACK_CABLES" | "CLOSED_DOOR_RACK" | "BLANK_PANEL" | "NO_RACK", "full_rack_visible": bool, "reason": string}. ' +
+  '{"view": "OPEN_RACK_CABLES" | "CLOSED_DOOR_RACK" | "BLANK_PANEL" | "NO_RACK", "full_rack_visible": bool, "rack_x": number|null, "rack_w": number|null, "reason": string}. ' +
+  "If the rack (or the box it is printed on) shows two faces, classify the face that most squarely faces the camera. " +
   "OPEN_RACK_CABLES: the open rear of a server rack with rack-mounted equipment and network/power cables directly visible (no door). " +
   "CLOSED_DOOR_RACK: a server rack whose equipment is seen through a closed perforated/mesh front door. " +
   "BLANK_PANEL: a plain solid rack side panel or solid door with no equipment or cables visible. " +
   "NO_RACK: no server rack in view. A printed photo of a rack counts as that rack. " +
   "full_rack_visible: the rack fills most of the frame and is not badly cut off. " +
+  "rack_x: horizontal centre of the rack / box in the frame, 0 = left edge, 0.5 = centre, 1 = right edge (null if none). " +
+  "rack_w: the rack / box width as a fraction of the frame width (null if none). " +
   "reason: one short plain-English sentence explaining what you see.";
 async function look(): Promise<Look> {
   if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing in agent/.env");
@@ -479,7 +482,8 @@ async function look(): Promise<Look> {
   const text = body.choices?.[0]?.message?.content ?? "";
   const m = text.match(/\{[\s\S]*\}/);
   if (!r.ok || !m) throw new Error(`vision check failed (HTTP ${r.status})`);
-  const j = JSON.parse(m[0]) as { view?: string; full_rack_visible?: boolean; reason?: string };
+  const j = JSON.parse(m[0]) as { view?: string; full_rack_visible?: boolean; reason?: string; rack_x?: unknown; rack_w?: unknown };
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null);
   const view: View = (["OPEN_RACK_CABLES", "CLOSED_DOOR_RACK", "BLANK_PANEL", "NO_RACK"] as const).find((v) => v === j.view) ?? "NO_RACK";
   return {
     view,
@@ -487,6 +491,8 @@ async function look(): Promise<Look> {
     full_rack_visible: view !== "NO_RACK" && j.full_rack_visible === true,
     wires_visible: view === "OPEN_RACK_CABLES",
     reason: String(j.reason ?? "").slice(0, 300),
+    x: view === "NO_RACK" ? null : num(j.rack_x),
+    w: view === "NO_RACK" ? null : num(j.rack_w),
   };
 }
 async function lookAndLog(where: string) {
@@ -572,12 +578,67 @@ async function undoMoves(n: number) {
 }
 
 /** Sweep the box: front, then each side (back to the front in between). Photograph the open cabled rack when seen. */
+// ---- camera-guided moves (keep the box in view) ----
+const FOV_DEG = Number(env("ROVER_FOV_DEG", "70"));
+const MS_PER_DEG = TURN90_MS / 90;
+const STANDOFF_CM = Number(env("ROVER_STANDOFF_CM", "45"));
+const ORBIT_TURN_DEG = Number(env("ROVER_ORBIT_TURN_DEG", "35"));
+const ORBIT_STEP_CM = Number(env("ROVER_ORBIT_STEP_CM", "22"));
+const ORBIT_MAX_STEPS = Number(env("ROVER_ORBIT_MAX_STEPS", "6"));
+
+async function turnDeg(dir: "left" | "right", deg: number) {
+  const ms = Math.max(80, Math.min(700, Math.round(deg * MS_PER_DEG)));
+  const sp = dir === "right" ? TURN_SPEED : -TURN_SPEED;
+  await driveLR(sp, -sp, ms);
+  await sleep(350);
+}
+
+/** Turn in small steps until the box is centred in the camera. `hint` = which way to turn if the box is out of view. */
+async function centre(where: string, hint: "left" | "right" | null = null): Promise<Look> {
+  let l = await lookAndLog(where);
+  for (let i = 0; i < 4; i++) {
+    checkAbort();
+    if (!l.rack_visible || l.x === null) {
+      if (!hint) return l;
+      log(`Box out of view; turning ${hint} to find it.`);
+      await turnDeg(hint, 25);
+    } else {
+      const errDeg = (l.x - 0.5) * FOV_DEG;
+      if (Math.abs(errDeg) < 7) return l;
+      await turnDeg(errDeg > 0 ? "right" : "left", Math.abs(errDeg) * 0.9);
+    }
+    l = await lookAndLog(`${where} (re-centred)`);
+  }
+  return l;
+}
+
+/** With the box centred, keep about STANDOFF_CM from it (distance sensor). */
+async function keepStandoff() {
+  const s = await sensors();
+  const d = s.dist_cm;
+  if (d === null) return;
+  const err = d - STANDOFF_CM;
+  if (Math.abs(err) < 6) return;
+  const ms = Math.min(2500, cmToMs(Math.abs(err)));
+  if (err > 0) await drive(APPROACH_SPEED, ms);
+  else await drive(-APPROACH_SPEED, ms);
+  await sleep(300);
+}
+
+/** One step of circling the box toward `side`: turn away, inch forward, turn back until centred. */
+async function orbitStep(side: "left" | "right", where: string): Promise<Look> {
+  await turnDeg(side, ORBIT_TURN_DEG);
+  await drive(APPROACH_SPEED, cmToMs(ORBIT_STEP_CM));
+  await sleep(300);
+  // the box is now off to the opposite side; turn back toward it until centred
+  const l = await centre(where, other(side));
+  if (l.rack_visible) await keepStandoff();
+  return l;
+}
+
+/** Sweep one box with the camera: front, then circle left; if not found, circle back and try right. */
 async function sweepInspect(db: DbConnection, rackId: string, why: string) {
   log(`SWEEP ${rackId}: ${why}`);
-  phase("driving to rack", rackId);
-  log("Driving up to the rack (distance sensor)...");
-  await approach();
-  await sleep(600);
   let image: ImageAttachment | null = null;
   const take = async (where: string) => {
     log(`Target found on the ${where}: open rack with exposed cabling. Taking the inspection photo.`);
@@ -593,29 +654,55 @@ async function sweepInspect(db: DbConnection, rackId: string, why: string) {
       if (i < SENSOR_SAMPLES - 1) await sleep(1200);
     }
   };
-  let l = await lookAndLog("front");
+
+  phase("finding the rack", rackId);
+  let l = await centre("start");
   if (!l.rack_visible) {
-    log("AI decision: no server rack ahead, so nothing to inspect.");
+    log("AI decision: no server rack in view, so nothing to inspect.");
     return;
   }
+  phase("driving to rack", rackId);
+  log("Box centred. Driving up to it (distance sensor).");
+  const before = await sensors();
+  await keepStandoff();
+  const after = await sensors();
+  const approachedCm = before.dist_cm !== null && after.dist_cm !== null ? Math.max(0, before.dist_cm - after.dist_cm) : 0;
+  l = await centre("front");
+  const frontView = l.view;
   if (l.view === "OPEN_RACK_CABLES") await take("front");
-  else log(`Front is ${VIEW_LABEL[l.view]}: not the target. Checking the other sides.`);
+  else log(`Front is ${VIEW_LABEL[l.view]}: not the target. Circling the box to check its sides.`);
+
   for (const side of SWEEP_SIDES) {
+    if (image) break;
     checkAbort();
-    phase(`driving around to the ${side} side`, rackId);
-    log(`Driving around to the ${side} side of the rack...`);
-    const n = await goToSide(side);
-    l = await lookAndLog(`${side} side`);
-    const found = l.view === "OPEN_RACK_CABLES" && !image;
+    phase(`circling ${side}`, rackId);
+    let steps = 0;
+    let found = false;
+    for (; steps < ORBIT_MAX_STEPS; steps++) {
+      checkAbort();
+      l = await orbitStep(side, `${side} step ${steps + 1}`);
+      if (l.view === "OPEN_RACK_CABLES") { found = true; steps++; break; }
+      if (l.rack_visible && l.view !== frontView && l.full_rack_visible) {
+        log(`${side} side is ${VIEW_LABEL[l.view]}: not the target, no photo.`);
+        steps++;
+        break;
+      }
+    }
     if (found) await take(`${side} side`);
-    else log(`${side} side is ${VIEW_LABEL[l.view]}: not the target, no photo.`);
-    phase("back to the front", rackId);
-    log("Going back to the front.");
-    await undoMoves(n);
-    await sleep(400);
-    if (image) break; // found it: no need to check the other side
+    // circle back to the front, still watching the box
+    phase("circling back to the front", rackId);
+    log("Circling back to the front.");
+    for (let i = 0; i < steps + 2; i++) {
+      checkAbort();
+      l = await orbitStep(other(side), `back step ${i + 1}`);
+      if (l.view === frontView && i >= steps - 1) break;
+    }
   }
-  await returnHome();
+
+  phase("returning to start", rackId);
+  log("Backing away from the box to the start.");
+  if (approachedCm > 0) await drive(-APPROACH_SPEED, Math.min(4000, cmToMs(approachedCm)));
+  trail = []; // visual moves are not retraced blindly
   if (image) await investigate(db, rackId, image);
   else log("AI decision: no open rack with exposed cabling on any side, so no photo was taken.");
 }
@@ -666,9 +753,85 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
   await investigate(db, rackId, image);
 }
 
+// ---- fixed demo route ----
+const ROUTE = {
+  forwardCm: Number(env("ROUTE_FORWARD_CM", "30")),
+  diagDeg: Number(env("ROUTE_DIAG_DEG", "45")),
+  diagCm: Number(env("ROUTE_DIAG_CM", "40")),
+  faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
+  pauseMs: Number(env("ROUTE_PAUSE_MS", "2000")),
+};
+const degMs = (deg: number) => Math.round((deg / 90) * TURN90_MS);
+
+/** Show the current camera frame on the dashboard with a scripted note (no AI decision). */
+async function showView(where: string, view: string, note: string, wires: boolean) {
+  try {
+    await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) }); // refresh last frame for /thumb
+  } catch { /* preview is optional */ }
+  status.last_look = { t: new Date().toLocaleTimeString(), where, view, rack: true, full: true, wires, reason: note, img: await roverThumb() };
+}
+
+/** Predefined route: front, left side (no wires), back to centre, right side (wires: photo), back to start. */
+async function routeInspect(db: DbConnection, rackId: string, why: string) {
+  log(`ROUTE ${rackId}: ${why}`);
+  phase("driving to rack", rackId);
+  log(`Driving ${ROUTE.forwardCm} cm straight toward the rack.`);
+  await fwd(cmToMs(ROUTE.forwardCm));
+  phase("inspecting the front", rackId);
+  await showView("front", "front of the rack", "Front of the rack: solid panel, no wiring visible.", false);
+  log("Front of the rack: solid panel, no wiring visible. Checking the left side.");
+  await sleep(ROUTE.pauseMs);
+  const centre = trail.length;
+
+  // left side
+  checkAbort();
+  phase("going to the left side", rackId);
+  await turn("left", degMs(ROUTE.diagDeg)); await sleep(300);
+  await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
+  await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
+  phase("inspecting the left side", rackId);
+  await showView("left side", "left side of the rack", "Left side: no exposed wires on this side.", false);
+  log("Left side: no exposed wires on this side.");
+  await sleep(ROUTE.pauseMs);
+
+  // back to the centre the same way
+  checkAbort();
+  phase("going back to the front", rackId);
+  log("Going back to the front.");
+  while (trail.length > centre) { await undoLast(); await sleep(300); }
+  await sleep(500);
+
+  // right side
+  checkAbort();
+  phase("going to the right side", rackId);
+  log("Checking the right side.");
+  await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
+  await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
+  await turn("left", degMs(ROUTE.faceDeg)); await sleep(500);
+  phase("taking photo", rackId);
+  await showView("right side", "open rack with exposed cabling (TARGET)", "Right side: exposed wiring found. Taking the inspection photo.", true);
+  log("Right side: exposed wiring found. Taking the inspection photo.");
+  const image = await photo();
+  log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
+  phase("reading sensors", rackId);
+  for (let i = 0; i < SENSOR_SAMPLES; i++) {
+    const s = await sensors();
+    if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
+    const n = await recordReadings(db, rackId, s);
+    log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
+    if (i < SENSOR_SAMPLES - 1) await sleep(1200);
+  }
+  await sleep(ROUTE.pauseMs);
+  checkAbort();
+  await returnHome(); // retrace everything back to the start
+  await investigate(db, rackId, image);
+}
+
 /** ROVER_MODE=sweep (default): drive around one box. ROVER_MODE=search: turn left/right to find among several boxes. */
-const inspectRack = (db: DbConnection, rackId: string, why: string) =>
-  env("ROVER_MODE", "sweep") === "search" ? smartInspect(db, rackId, why) : sweepInspect(db, rackId, why);
+const inspectRack = (db: DbConnection, rackId: string, why: string) => {
+  const mode = env("ROVER_MODE", "route"); // route (fixed demo path, default) | sweep (camera-guided) | search
+  return mode === "search" ? smartInspect(db, rackId, why) : mode === "sweep" ? sweepInspect(db, rackId, why) : routeInspect(db, rackId, why);
+};
 
 // drive() with opposite wheel speeds turns in place
 async function driveLR(l: number, r: number, ms: number) {
