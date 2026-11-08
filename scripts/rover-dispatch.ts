@@ -807,6 +807,36 @@ async function showView(where: string, view: string, note: string, wires: boolea
   status.last_look = { t: new Date().toLocaleTimeString(), where, view, rack: true, full: true, wires, reason: note, img: await roverThumb() };
 }
 
+// ---- distance-aware moves ----
+const MIN_CM = Number(env("ROUTE_MIN_CM", "22"));       // never drive closer than this to anything ahead
+const PHOTO_CM = Number(env("ROUTE_PHOTO_CM", "38"));   // best distance from the box for a look/photo
+/** Drive forward up to `cm`, but stop early if something is closer than `stopCm` (distance sensor). Recorded for home. */
+async function safeFwd(cm: number, stopCm = MIN_CM): Promise<number | null> {
+  const r = await roverText(`/approach?target=${stopCm}&speed=${APPROACH_SPEED}&max_ms=${cmToMs(cm)}`, 20_000);
+  const ms = Number(r.match(/ms=(\d+)/)?.[1] ?? 0);
+  if (r.includes("reason=no-distance")) {
+    log("Distance sensor not responding; driving by time.", true);
+    await fwd(cmToMs(cm));
+  } else if (ms > 0) {
+    trail.push({ forward: ms });
+  }
+  const d = (await sensors()).dist_cm;
+  if (r.includes("reason=reached")) log(`Stopped early: something ${d} cm ahead.`);
+  return d;
+}
+/** At a stop facing the box: get to about PHOTO_CM from it (closer if far, back up if too close). */
+async function standoff(where: string) {
+  const d = (await sensors()).dist_cm;
+  if (d === null) { log(`${where}: nothing in range of the distance sensor.`, true); return; }
+  if (d > PHOTO_CM + 12 && d < 120) {
+    log(`${where}: box is ${d} cm away; moving in to about ${PHOTO_CM} cm.`);
+    await safeFwd(Math.min(30, d - PHOTO_CM), PHOTO_CM);
+  } else if (d < PHOTO_CM - 12) {
+    log(`${where}: box is only ${d} cm away; backing up a little.`);
+    await back(cmToMs(PHOTO_CM - d)); await sleep(300);
+  }
+}
+
 /** Ask Nemotron if the cabled rack is in view. If the box is partly in view, nudge toward it
  *  (small turn + a little push forward); otherwise scan left/right. All moves are recorded for the way home. */
 async function findWiresNearby(where: string, scan = true): Promise<boolean> {
@@ -818,7 +848,7 @@ async function findWiresNearby(where: string, scan = true): Promise<boolean> {
     const errDeg = (l.x - 0.5) * FOV_DEG;
     if (Math.abs(errDeg) >= 8) await turnDeg(errDeg > 0 ? "right" : "left", Math.min(12, Math.abs(errDeg) * 0.6));
     const d = (await sensors()).dist_cm;
-    if (d === null || d > 30) { log(`Nudging ${pushCm} cm closer to the box.`); await fwd(cmToMs(pushCm)); await sleep(300); }
+    if (d === null || d > PHOTO_CM - 8) { log(`Nudging up to ${pushCm} cm closer to the box.`); await safeFwd(pushCm, PHOTO_CM - 8); await sleep(300); }
     l = await lookAndLog(`${where} (nudged)`);
   }
   if (l.view === "OPEN_RACK_CABLES") return true;
@@ -888,9 +918,10 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   checkAbort();
   phase("going to the left side", rackId);
   await turn("left", degMs(ROUTE.diagDeg)); await sleep(300);
-  await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
+  await safeFwd(ROUTE.diagCm); await sleep(300);
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
   phase("inspecting the left side", rackId);
+  await standoff("Left side");
   if (await findWiresNearby("Left side", false)) return finish("Left side", true);
   log("Left side: no exposed wires on this side.");
   await sleep(ROUTE.pauseMs);
@@ -907,9 +938,10 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   phase("going to the right side", rackId);
   log("Checking the right side.");
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
-  await fwd(cmToMs(ROUTE.diagRightCm)); await sleep(300);
+  await safeFwd(ROUTE.diagRightCm); await sleep(300);
   await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
   phase("inspecting the right side", rackId);
+  await standoff("Right side");
   return finish("Right side", await findWiresNearby("Right side", true));
 }
 
