@@ -46,17 +46,21 @@ export function evaluate(
     temperatureCriticalC: number;
     humidityWarningPercent: number;
   },
+  /** Where the thresholds come from: fictional demo settings or a manufacturer-documented range. */
+  basis: "demonstration" | "manufacturer-documented" = "demonstration",
 ) {
+  const kind = basis === "demonstration" ? "demonstration" : "manufacturer-documented";
+  const caveat = basis === "demonstration" ? "" : " Rover ambient air is not the server inlet temperature; this is not a compliance verdict.";
   if (metric === "AMBIENT_TEMPERATURE_C") {
     if (value >= profile.temperatureCriticalC)
       return {
         severity: "CRITICAL",
-        message: `Ambient temperature ${value} °C is at or above the demonstration critical threshold ${profile.temperatureCriticalC} °C.`,
+        message: `Ambient temperature ${value} °C is at or above the ${kind} critical threshold ${profile.temperatureCriticalC} °C.${caveat}`,
       };
     if (value >= profile.temperatureWarningC)
       return {
         severity: "WARNING",
-        message: `Ambient temperature ${value} °C is at or above the demonstration warning threshold ${profile.temperatureWarningC} °C.`,
+        message: `Ambient temperature ${value} °C is at or above the ${kind} warning threshold ${profile.temperatureWarningC} °C.${caveat}`,
       };
   }
   if (
@@ -65,7 +69,7 @@ export function evaluate(
   )
     return {
       severity: "WARNING",
-      message: `Relative humidity ${value} %RH is at or above the demonstration warning threshold ${profile.humidityWarningPercent} %RH.`,
+      message: `Relative humidity ${value} %RH is at or above the ${kind} warning threshold ${profile.humidityWarningPercent} %RH.${caveat}`,
     };
   return undefined;
 }

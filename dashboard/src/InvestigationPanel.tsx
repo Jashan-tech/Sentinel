@@ -10,6 +10,7 @@ import type {
   RackAlert,
   Investigation,
   InvestigationImage,
+  RackProfileSource,
 } from "./module_bindings/types";
 import {
   VERIFICATION_LABEL,
@@ -24,6 +25,8 @@ import {
 } from "./investigation";
 import Icon from "./Icon";
 import { mainFinding, plainText } from "./plainText";
+import { assignedIdentity } from "./equipmentView";
+import type { CatalogEntry } from "../../spacetimedb/src/equipmentCatalog";
 import EquipmentEvidence from "./EquipmentEvidence";
 import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
@@ -58,6 +61,8 @@ export default function InvestigationPanel(props: {
   current: readonly CurrentTelemetry[];
   history: readonly RecentObservation[];
   alerts: readonly RackAlert[];
+  assignedEquipment?: CatalogEntry;
+  profileSource?: RackProfileSource;
   ready: boolean;
   freshnessSeconds: number;
   telemetry: ReactNode;
@@ -98,7 +103,9 @@ export default function InvestigationPanel(props: {
   const [manufacturer, setManufacturer] = useState("");
   const [equipmentModel, setEquipmentModel] = useState("");
   const [identityConfirmed, setIdentityConfirmed] = useState(false);
+  const assigned = props.assignedEquipment;
   const identityReady =
+    Boolean(assigned) ||
     (!manufacturer.trim() && !equipmentModel.trim() && !identityConfirmed) ||
     (Boolean(manufacturer.trim()) &&
       Boolean(equipmentModel.trim()) &&
@@ -187,10 +194,24 @@ export default function InvestigationPanel(props: {
         alerts: props.alerts,
         asOf: new Date(),
         staleAfterSeconds: props.freshnessSeconds,
+        ...(props.profileSource && assigned && props.profileSource.modelId === assigned.modelId
+          ? {
+              thresholdSource: {
+                kind: "MANUFACTURER_DOCUMENTED_RANGE" as const,
+                doc_id: props.profileSource.docId,
+                manufacturer: assigned.manufacturer,
+                model: assigned.model,
+                source_url: props.profileSource.sourceUrl,
+                mapping: props.profileSource.mapping,
+              },
+            }
+          : {}),
       },
       {
         ...(mode === "TELEMETRY" ? {} : { mode, image: attached }),
-        ...(identityConfirmed
+        ...(assigned
+          ? { equipmentIdentity: assignedIdentity(assigned) }
+          : identityConfirmed
           ? {
               equipmentIdentity: {
                 manufacturer: manufacturer.trim(),
@@ -525,6 +546,15 @@ export default function InvestigationPanel(props: {
             </div>
           </section>
         )}
+        {assigned ? (
+          <p className="identity-assigned" data-testid="identity-assigned">
+            Investigations use the installed server assigned above:{" "}
+            <b>
+              {assigned.manufacturer} {assigned.model}
+            </b>{" "}
+            (operator-assigned).
+          </p>
+        ) : (
         <details className="advanced-settings identity-settings">
           <summary>
             Installed equipment identity <span>Optional</span>
@@ -535,7 +565,7 @@ export default function InvestigationPanel(props: {
           >
             <legend>
               Installed equipment identity{" "}
-              <small>optional ? operator assertion for this rack</small>
+              <small>optional · operator assertion for this rack</small>
             </legend>
             <div className="identity-fields">
               <label>
@@ -588,6 +618,7 @@ export default function InvestigationPanel(props: {
             )}
           </fieldset>
         </details>
+        )}
       </div>
       <section
         className="panel investigation"

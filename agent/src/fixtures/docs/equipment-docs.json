@@ -1,13 +1,21 @@
 {
-  "_note": "Concise source-grounded reference facts accessed 2026-11-07. Manufacturer records require exact explicit rack identity; generic profiles and online photographs do not identify installed equipment. No manuals are reproduced.",
+  "_note": "Concise source-grounded reference facts (accessed 2026-11-07 and 2026-11-08). Manufacturer records require exact explicit rack identity; generic profiles and online photographs do not identify installed equipment. No manuals are reproduced.",
   "documents": [
     {
       "doc_id": "SENTINEL-DEMO-PROFILES",
       "title": "SENTINEL demo rack profiles",
       "source_type": "FICTIONAL_DEMO_CONFIGURATION",
       "verified": false,
-      "applies_to": ["Compute", "Network", "Storage"],
-      "topics": ["temperature", "humidity", "general"],
+      "applies_to": [
+        "Compute",
+        "Network",
+        "Storage"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
       "content": "Rack profile thresholds (temperature_warning_c, temperature_critical_c, humidity_*_percent) are fictional settings created for the SENTINEL hackathon demo. They are not manufacturer specifications and are not derived from any vendor documentation."
     },
     {
@@ -15,8 +23,18 @@
       "title": "SENTINEL rover sensor notes",
       "source_type": "PROJECT_DOCUMENTATION",
       "verified": true,
-      "applies_to": ["Compute", "Network", "Storage"],
-      "topics": ["temperature", "humidity", "acoustic", "distance", "general"],
+      "applies_to": [
+        "Compute",
+        "Network",
+        "Storage"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "acoustic",
+        "distance",
+        "general"
+      ],
       "content": "The rover measures ambient temperature and relative humidity near the rack, raw sound intensity (SOUND_RAW, an uncalibrated microphone level, not decibels), and ultrasonic distance in cm to the nearest surface in front of the sensor. Rover ambient temperature is not equipment inlet or component temperature. The rover cannot read fan RPM, CPU utilization, power draw, interface errors, or hardware health."
     },
     {
@@ -25,8 +43,15 @@
       "source_type": "MANUFACTURER_SPECIFICATION",
       "verified": false,
       "availability": "UNAVAILABLE",
-      "applies_to": ["Compute"],
-      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "acoustic",
+        "general"
+      ],
       "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
     },
     {
@@ -35,8 +60,15 @@
       "source_type": "MANUFACTURER_SPECIFICATION",
       "verified": false,
       "availability": "UNAVAILABLE",
-      "applies_to": ["Network"],
-      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "applies_to": [
+        "Network"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "acoustic",
+        "general"
+      ],
       "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
     },
     {
@@ -45,8 +77,15 @@
       "source_type": "MANUFACTURER_SPECIFICATION",
       "verified": false,
       "availability": "UNAVAILABLE",
-      "applies_to": ["Storage"],
-      "topics": ["temperature", "humidity", "acoustic", "general"],
+      "applies_to": [
+        "Storage"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "acoustic",
+        "general"
+      ],
       "content": "No applicable manufacturer specification is available without matching, explicitly supplied rack equipment identity. Do not infer identity from a generic profile or reference photograph."
     },
     {
@@ -61,14 +100,24 @@
       "doc_id": "CISCO-C9300-LED",
       "manufacturer": "Cisco",
       "equipment_family": "Catalyst 9300",
-      "supported_models": ["C9300-24T", "C9300-48T", "C9300-24P", "C9300-48P"],
-      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide ? Product Overview",
+      "supported_models": [
+        "C9300-24T",
+        "C9300-48T",
+        "C9300-24P",
+        "C9300-48P"
+      ],
+      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide — Product Overview",
       "source_url": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Product-overview.html",
       "revision_date": "2026-05-15",
       "revision": "Updated May 15, 2026",
       "section": "LEDs / System LED, Table 8",
-      "applies_to": ["Network"],
-      "topics": ["led", "general"],
+      "applies_to": [
+        "Network"
+      ],
+      "topics": [
+        "led",
+        "general"
+      ],
       "technical_facts": [
         {
           "fact_id": "C9300-SYSTEM-GREEN",
@@ -96,14 +145,25 @@
       "doc_id": "CISCO-C9300-AIRFLOW",
       "manufacturer": "Cisco",
       "equipment_family": "Catalyst 9300",
-      "supported_models": ["C9300-24T", "C9300-48T", "C9300-24P", "C9300-48P"],
-      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide ? Preparing for Installation",
+      "supported_models": [
+        "C9300-24T",
+        "C9300-48T",
+        "C9300-24P",
+        "C9300-48P"
+      ],
+      "title": "Cisco Catalyst 9300 Series Switches Hardware Installation Guide — Preparing for Installation",
       "source_url": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Preparing-for-installation.html",
       "revision_date": "2026-05-15",
       "revision": "Updated May 15, 2026",
       "section": "Installation Guidelines; Site Requirements / Air Flow",
-      "applies_to": ["Network"],
-      "topics": ["airflow", "temperature", "general"],
+      "applies_to": [
+        "Network"
+      ],
+      "topics": [
+        "airflow",
+        "temperature",
+        "general"
+      ],
       "technical_facts": [
         {
           "fact_id": "C9300-AIRFLOW",
@@ -131,22 +191,30 @@
       "doc_id": "DELL-R7425-ENV",
       "manufacturer": "Dell",
       "equipment_family": "PowerEdge",
-      "supported_models": ["PowerEdge R7425"],
-      "title": "Dell EMC PowerEdge R7425 ? Technical specifications",
+      "supported_models": [
+        "PowerEdge R7425"
+      ],
+      "title": "Dell EMC PowerEdge R7425 — Technical specifications",
       "source_url": "https://dl.dell.com/topicspdf/poweredge-r7425_reference-guide2_en-us.pdf",
       "revision_date": "2019-12",
       "revision": "Rev. A09",
-      "section": "Environmental specifications, pp. 11?12, Tables 8, 9, 13, 14",
-      "applies_to": ["Compute"],
-      "topics": ["temperature", "humidity", "general"],
+      "section": "Environmental specifications, pp. 11–12, Tables 8, 9, 13, 14",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
       "technical_facts": [
         {
           "fact_id": "R7425-STANDARD-TEMP",
-          "statement": "Standard continuous operation is 10?35 ?C below 950 m altitude, with no direct sunlight. Maximum supported temperature is reduced at higher altitude; configuration restrictions and expanded operation are separate."
+          "statement": "Standard continuous operation is 10–35 °C below 950 m altitude, with no direct sunlight. Maximum supported temperature is reduced at higher altitude; configuration restrictions and expanded operation are separate."
         },
         {
           "fact_id": "R7425-OPERATING-HUMIDITY",
-          "statement": "Operating relative humidity is 10?80% with a maximum dew point of 29 ?C."
+          "statement": "Operating relative humidity is 10–80% with a maximum dew point of 29 °C."
         }
       ],
       "limitations": [
@@ -166,27 +234,271 @@
       "doc_id": "HPE-DL380-G11-ENV",
       "manufacturer": "HPE",
       "equipment_family": "ProLiant",
-      "supported_models": ["ProLiant DL380 Gen11"],
+      "supported_models": [
+        "ProLiant DL380 Gen11"
+      ],
       "title": "HPE ProLiant DL380 Gen11 QuickSpecs",
       "source_url": "https://www.hpe.com/psnow/downloadDoc/HPE%20ProLiant%20DL380%20Gen11%20QuickSpecs-a50004307enw.pdf?contentDisposition=attachment&deepLink=&form=false&hf=regular&id=a50004307enw.pdf&isFutureVersion=true&isLinearized=false&originalObjectName=&prelaunchSection=&preview=false&print=&r=&section=&softrollSection=&utm_campaign=&utm_content=&utm_medium=&utm_source=&utm_term=&ver=49",
       "revision_date": "2026-11-02",
       "revision": "a50004307enw, Version 49",
-      "section": "Technical Specifications, pp. 79?80 / Relative Humidity; System Inlet Temperature",
-      "applies_to": ["Compute"],
-      "topics": ["temperature", "humidity", "general"],
+      "section": "Technical Specifications, pp. 79–80 / Relative Humidity; System Inlet Temperature",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
       "technical_facts": [
         {
           "fact_id": "DL380-G11-INLET",
-          "statement": "Standard inlet operation is 10?35 ?C at sea level, derated by 1 ?C per 305 m to 3050 m; installed options may lower the upper limit or permitted rate of change."
+          "statement": "Standard inlet operation is 10–35 °C at sea level, derated by 1 °C per 305 m to 3050 m; installed options may lower the upper limit or permitted rate of change."
         },
         {
           "fact_id": "DL380-G11-HUMIDITY",
-          "statement": "Operating relative humidity is 8?90%, non-condensing, with a 28 ?C maximum wet-bulb temperature."
+          "statement": "Operating relative humidity is 8–90%, non-condensing, with a 28 °C maximum wet-bulb temperature."
         }
       ],
       "limitations": [
         "Check the installed options and approved configuration before applying limits; extended operation is not assumed.",
         "A rover ambient reading does not establish system inlet temperature, wet-bulb temperature, or condensation. No automatic manufacturer-compliance assessment."
+      ]
+    },
+    {
+      "doc_id": "DELL-R760-ENV",
+      "manufacturer": "Dell",
+      "equipment_family": "PowerEdge",
+      "supported_models": [
+        "PowerEdge R760"
+      ],
+      "title": "Dell PowerEdge R760 Installation and Service Manual — Environmental specifications",
+      "source_url": "https://www.dell.com/support/manuals/en-us/poweredge-r760/per760_ism_pub/environmental-specifications?guid=guid-11193b30-1caa-4e7b-900f-bc79a66398ad&lang=en-us",
+      "revision_date": null,
+      "revision": null,
+      "section": "Tables 1–4: Continuous Operation Specifications for ASHRAE A2, A3, A4; Common Environmental Specifications",
+      "technical_facts": [
+        {
+          "fact_id": "R760-A2-TEMP",
+          "statement": "ASHRAE A2 continuous operation: 10–35 °C for altitudes ≤ 900 m, with no direct sunlight on the equipment; maximum temperature reduced by 1 °C/300 m above 900 m."
+        },
+        {
+          "fact_id": "R760-A3-A4-TEMP",
+          "statement": "ASHRAE A3: 5–40 °C (35–40 °C limited to 10% annual runtime). ASHRAE A4: 5–45 °C (35–40 °C 10% and 40–45 °C 1% annual runtime)."
+        },
+        {
+          "fact_id": "R760-A2-HUMIDITY",
+          "statement": "ASHRAE A2 humidity: 8% RH with −12 °C minimum dew point to 80% RH with 21 °C maximum dew point, non-condensing at all times."
+        },
+        {
+          "fact_id": "R760-GRADIENT",
+          "statement": "Maximum temperature gradient: 20 °C in an hour and 5 °C in 15 minutes (operation and non-operation)."
+        }
+      ],
+      "limitations": [
+        "Documented limits are for server inlet air; a rover ambient reading near the rack is not a verified inlet measurement.",
+        "Check altitude, installed options and the approved configuration before applying any limit; no compliance verdict is supported.",
+        "Extended (A3/A4) operation applies only to configurations that support it."
+      ],
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-08",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "Documented ranges are reference context; they become alert thresholds only if the operator applies them to the rack's profile."
+      ]
+    },
+    {
+      "doc_id": "HPE-DL360-G11-ENV",
+      "manufacturer": "HPE",
+      "equipment_family": "ProLiant",
+      "supported_models": [
+        "ProLiant DL360 Gen11"
+      ],
+      "title": "HPE ProLiant DL360 Gen11 Server User Guide — Environmental specifications",
+      "source_url": "https://support.hpe.com/hpesc/public/docDisplay?docId=sd00002444en_us&page=GUID-F3AAB60A-8A77-40E2-8DB6-B4D1B52ABFB9.html",
+      "revision_date": null,
+      "revision": null,
+      "section": "Environmental specifications (temperature range, relative humidity, footnote 1)",
+      "technical_facts": [
+        {
+          "fact_id": "DL360-G11-TEMP",
+          "statement": "Operating 10–35 °C at sea level; altitude derating 1.0 °C per 304.8 m to 3048 m; no direct sunlight; maximum rate of change 20 °C per hour; the upper limit and rate of change might be limited by installed options."
+        },
+        {
+          "fact_id": "DL360-G11-EXTENDED",
+          "statement": "For certain approved hardware configurations the supported system inlet range is extended to 5–10 °C and 35–40 °C, and to 40–45 °C, each with its own altitude derating above 900 m."
+        },
+        {
+          "fact_id": "DL360-G11-HUMIDITY",
+          "statement": "Operating relative humidity (non-condensing): minimum the higher of −12 °C dew point or 8% RH; maximum 24 °C dew point or 90% RH."
+        }
+      ],
+      "limitations": [
+        "Documented limits are for server inlet air; a rover ambient reading near the rack is not a verified inlet measurement.",
+        "Check altitude, installed options and the approved configuration before applying any limit; no compliance verdict is supported.",
+        "Extended ranges apply only to the approved hardware configurations listed by HPE."
+      ],
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-08",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "Documented ranges are reference context; they become alert thresholds only if the operator applies them to the rack's profile."
+      ]
+    },
+    {
+      "doc_id": "LENOVO-SR650-V3-ENV",
+      "manufacturer": "Lenovo",
+      "equipment_family": "ThinkSystem",
+      "supported_models": [
+        "ThinkSystem SR650 V3"
+      ],
+      "title": "ThinkSystem SR650 V3 — Environmental specifications (Lenovo Docs)",
+      "source_url": "https://pubs.lenovo.com/sr650-v3/server_specifications_environmental",
+      "revision_date": null,
+      "revision": null,
+      "section": "Environment: Air temperature; Relative humidity (non-condensing)",
+      "technical_facts": [
+        {
+          "fact_id": "SR650V3-A2-TEMP",
+          "statement": "ASHRAE class A2 operating air temperature 10–35 °C; the maximum decreases by 1 °C for every 300 m above 900 m."
+        },
+        {
+          "fact_id": "SR650V3-A3-A4-TEMP",
+          "statement": "ASHRAE A3 5–40 °C and A4 5–45 °C (configuration-dependent); above the supported maximum (A4 45 °C) the server shuts down and will not power on until the ambient falls within range."
+        },
+        {
+          "fact_id": "SR650V3-A2-HUMIDITY",
+          "statement": "ASHRAE class A2 relative humidity 20%–80%, maximum dew point 21 °C, non-condensing."
+        }
+      ],
+      "limitations": [
+        "Documented limits are for server inlet air; a rover ambient reading near the rack is not a verified inlet measurement.",
+        "Check altitude, installed options and the approved configuration before applying any limit; no compliance verdict is supported.",
+        "Lenovo Press product guide LP1601 lists the A2 humidity minimum as 8%; this record uses the Lenovo Docs page (20%)."
+      ],
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-08",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "Documented ranges are reference context; they become alert thresholds only if the operator applies them to the rack's profile."
+      ]
+    },
+    {
+      "doc_id": "CISCO-C220-M7-ENV",
+      "manufacturer": "Cisco",
+      "equipment_family": "UCS C-Series",
+      "supported_models": [
+        "UCS C220 M7"
+      ],
+      "title": "Cisco UCS C220 M7 Server Installation and Service Guide — Server Specifications",
+      "source_url": "https://www.cisco.com/c/en/us/td/docs/unified_computing/ucs/c/hw/C220M7/install/b-c220-m7-installation-guide/m-specifications.html",
+      "revision_date": "2026-04-13",
+      "revision": "Updated April 13, 2026",
+      "section": "Environmental Specifications (Table 2)",
+      "technical_facts": [
+        {
+          "fact_id": "C220M7-TEMP",
+          "statement": "Class A2 product: operating dry bulb temperature 10–35 °C; maximum temperature change 20 °C per hour; derate the maximum by 1 °C per 305 m above 900 m."
+        },
+        {
+          "fact_id": "C220M7-HUMIDITY",
+          "statement": "Operating humidity 10% to 90% and 28 °C maximum dew point, non-condensing; the same table states a minimum of the higher of −12 °C dew point or 8% RH and a maximum of 24 °C dew point or 90% RH."
+        }
+      ],
+      "limitations": [
+        "Documented limits are for server inlet air; a rover ambient reading near the rack is not a verified inlet measurement.",
+        "Check altitude, installed options and the approved configuration before applying any limit; no compliance verdict is supported.",
+        "No extended temperature class is documented for this server in the source."
+      ],
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-08",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "Documented ranges are reference context; they become alert thresholds only if the operator applies them to the rack's profile."
+      ]
+    },
+    {
+      "doc_id": "SUPERMICRO-SYS-621C-TN12R-ENV",
+      "manufacturer": "Supermicro",
+      "equipment_family": "CloudDC",
+      "supported_models": [
+        "SYS-621C-TN12R"
+      ],
+      "title": "Supermicro CloudDC SuperServer SYS-621C-TN12R datasheet",
+      "source_url": "https://www.supermicro.com/en/products/system/datasheet/sys-621c-tn12r",
+      "revision_date": "2026-11-05",
+      "revision": "Datasheet PDF generated 2026-11-05",
+      "section": "Operating Environment (page 3)",
+      "technical_facts": [
+        {
+          "fact_id": "SYS621C-TEMP",
+          "statement": "Operating environment A2: operating temperature 10 °C to 35 °C; non-operating −30 °C to 60 °C."
+        },
+        {
+          "fact_id": "SYS621C-HUMIDITY",
+          "statement": "Operating relative humidity 8% to 80% (max 21 °C dew point; non-condensing); non-operating 8% to 90% (max 38 °C dew point)."
+        }
+      ],
+      "limitations": [
+        "Documented limits are for server inlet air; a rover ambient reading near the rack is not a verified inlet measurement.",
+        "Check altitude, installed options and the approved configuration before applying any limit; no compliance verdict is supported.",
+        "The datasheet does not state altitude derating or an extended temperature class."
+      ],
+      "source_type": "MANUFACTURER_SPECIFICATION",
+      "verified": true,
+      "availability": "AVAILABLE",
+      "access_date": "2026-11-08",
+      "applies_to": [
+        "Compute"
+      ],
+      "topics": [
+        "temperature",
+        "humidity",
+        "general"
+      ],
+      "applicability_conditions": [
+        "Exact manufacturer and supported model must be explicitly identified for this rack.",
+        "Documented ranges are reference context; they become alert thresholds only if the operator applies them to the rack's profile."
       ]
     }
   ]

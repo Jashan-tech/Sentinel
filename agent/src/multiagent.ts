@@ -43,6 +43,7 @@ import {
   type SpecialistFinding,
   type VerificationResult,
   type VerificationOutcome,
+  thresholdProvenance,
 } from "./schemas.js";
 
 export interface MultiAgentOptions {
@@ -92,7 +93,7 @@ const SENSOR_RULES = `Facts about the data:
   Fan RPM, CPU load, power, interface errors and hardware health are NOT available. Never invent them.
 - SOUND_RAW is uncalibrated raw intensity (not decibels); alone it cannot identify a mechanical fault.
 - Ultrasonic distance is exclusively collision safety. Never use it for equipment diagnosis, severity, or missing equipment evidence. Ambient temperature alone does not prove a failed fan.
-- Rack profile thresholds are fictional demo settings, not manufacturer specifications.
+- Rack profile thresholds are fictional demo settings, unless their provenance is MANUFACTURER_DOCUMENTED_RANGE: then the operator set them from the installed server's documented inlet range. Either way, rover ambient air is not inlet temperature and a breach is not a fault or a compliance verdict.
 - Stale readings are not current evidence. Missing metrics are unknown, never "normal".
 - Use deterministic tools for numerical trends; preserve sampled windows, simulated provenance, source separation and data quality. No failure probabilities, useful-life estimates or failure dates.
 - Distinguish observed threshold conditions, early-warning trends, possible explanations, and verified equipment faults. This system can establish the first two; neither a photo nor a trend proves a fault.
@@ -235,7 +236,7 @@ export function compactMonitoring(trends: any[], indicators: any[], documentatio
       .filter((t) => t.series?.length)
       .map((t) => ({
         metric: t.metric_type,
-        thresholds: { warning: t.thresholds?.warning ?? null, critical: t.thresholds?.critical ?? null, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
+        thresholds: { warning: t.thresholds?.warning ?? null, critical: t.thresholds?.critical ?? null, provenance: t.thresholds?.provenance ?? "FICTIONAL_DEMO_CONFIGURATION" },
         series: t.series.map((s: any) => ({
           source: s.source_identifier,
           provenance: s.provenance,
@@ -452,7 +453,7 @@ export async function runMultiAgentInvestigation(
     measurements: [],
     history: [],
     // Known by code from the request; never depends on which tools an agent happened to call.
-    configured_thresholds: { ...request.profile, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
+    configured_thresholds: { ...request.profile, provenance: thresholdProvenance(request.profile) },
     documentation: [],
     images: images.map((i) => i.provenance),
     trends: deterministicTrends,
@@ -547,7 +548,7 @@ export async function runMultiAgentInvestigation(
     if (r.profile) {
       evidence.configured_thresholds = {
         ...r.profile,
-        provenance: "FICTIONAL_DEMO_CONFIGURATION",
+        provenance: thresholdProvenance(r.profile),
       };
     }
     for (const d of r.documents ?? []) {

@@ -72,6 +72,16 @@ const temperatureC = z
   .finite()
   .min(METRIC_RULES.AMBIENT_TEMPERATURE_C.min)
   .max(METRIC_RULES.AMBIENT_TEMPERATURE_C.max);
+/** Present when the operator applied a manufacturer-documented range as this rack's thresholds. */
+export const ThresholdSource = z.object({
+  kind: z.literal("MANUFACTURER_DOCUMENTED_RANGE"),
+  doc_id: z.string().min(1).max(80),
+  manufacturer: z.string().min(1).max(80),
+  model: z.string().min(1).max(120),
+  source_url: z.string().url().max(500),
+  mapping: z.string().min(1).max(600),
+});
+export type ThresholdSource = z.infer<typeof ThresholdSource>;
 export const RackProfile = z
   .object({
     name: z.string().min(1).max(128),
@@ -79,8 +89,10 @@ export const RackProfile = z
     temperature_critical_c: temperatureC,
     humidity_warning_percent: z.number().min(0).max(100).optional(),
     humidity_critical_percent: z.number().min(0).max(100).optional(),
+    threshold_source: ThresholdSource.optional(),
   })
-  .refine((p) => p.temperature_warning_c < p.temperature_critical_c, {
+  // A documented range may have no separate warning tier (warning == critical); demo profiles always do.
+  .refine((p) => (p.threshold_source ? p.temperature_warning_c <= p.temperature_critical_c : p.temperature_warning_c < p.temperature_critical_c), {
     message: "temperature_warning_c must be below temperature_critical_c",
   })
   .refine(
@@ -91,6 +103,9 @@ export const RackProfile = z
     { message: "humidity_warning_percent must be below humidity_critical_percent" },
   );
 export type RackProfile = z.infer<typeof RackProfile>;
+export type ThresholdProvenance = "FICTIONAL_DEMO_CONFIGURATION" | "MANUFACTURER_DOCUMENTED_RANGE";
+export const thresholdProvenance = (p: { threshold_source?: unknown }): ThresholdProvenance =>
+  p.threshold_source ? "MANUFACTURER_DOCUMENTED_RANGE" : "FICTIONAL_DEMO_CONFIGURATION";
 
 export const ActiveAlert = z.object({
   alert_id: z.string().max(128).optional(),

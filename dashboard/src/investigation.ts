@@ -33,6 +33,15 @@ export interface SnapshotInput {
     temperatureCriticalC: number;
     humidityWarningPercent: number;
   };
+  /** Set when the rack's thresholds were applied from a manufacturer-documented range. */
+  thresholdSource?: {
+    kind: "MANUFACTURER_DOCUMENTED_RANGE";
+    doc_id: string;
+    manufacturer: string;
+    model: string;
+    source_url: string;
+    mapping: string;
+  };
   current: readonly ObservationRow[];
   recent: readonly ObservationRow[];
   alerts: readonly {
@@ -143,6 +152,7 @@ export function buildInvestigationRequest(
       temperature_warning_c: s.profile.temperatureWarningC,
       temperature_critical_c: s.profile.temperatureCriticalC,
       humidity_warning_percent: s.profile.humidityWarningPercent,
+      ...(s.thresholdSource ? { threshold_source: s.thresholdSource } : {}),
     },
     current_telemetry: mine(s.current)
       .filter((r) => supported(r.metricType))

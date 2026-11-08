@@ -35,6 +35,8 @@ import {
 
 // Import all reducer arg schemas
 import AbandonInvestigationReducer from "./abandon_investigation_reducer";
+import ApplyDocumentedThresholdsReducer from "./apply_documented_thresholds_reducer";
+import AssignRackEquipmentReducer from "./assign_rack_equipment_reducer";
 import AttachInvestigationImageReducer from "./attach_investigation_image_reducer";
 import AuthorizeAgentReducer from "./authorize_agent_reducer";
 import AuthorizeBenchmarkRunnerReducer from "./authorize_benchmark_runner_reducer";
@@ -72,7 +74,9 @@ import InvestigationImageRow from "./investigation_image_table";
 import InvestigationProgressRow from "./investigation_progress_table";
 import RackRow from "./rack_table";
 import RackAlertRow from "./rack_alert_table";
+import RackEquipmentRow from "./rack_equipment_table";
 import RackProfileRow from "./rack_profile_table";
+import RackProfileSourceRow from "./rack_profile_source_table";
 import RecentObservationRow from "./recent_observation_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -249,6 +253,17 @@ const tablesSchema = __schema({
       { name: 'rack_alert_alert_id_key', constraint: 'unique', columns: ['alertId'] },
     ],
   }, RackAlertRow),
+  rackEquipment: __table({
+    name: 'rack_equipment',
+    indexes: [
+      { accessor: 'rackId', name: 'rack_equipment_rack_id_idx_btree', algorithm: 'btree', columns: [
+        'rackId',
+      ] },
+    ],
+    constraints: [
+      { name: 'rack_equipment_rack_id_key', constraint: 'unique', columns: ['rackId'] },
+    ],
+  }, RackEquipmentRow),
   rackProfile: __table({
     name: 'rack_profile',
     indexes: [
@@ -260,6 +275,17 @@ const tablesSchema = __schema({
       { name: 'rack_profile_profile_id_key', constraint: 'unique', columns: ['profileId'] },
     ],
   }, RackProfileRow),
+  rackProfileSource: __table({
+    name: 'rack_profile_source',
+    indexes: [
+      { accessor: 'profileId', name: 'rack_profile_source_profile_id_idx_btree', algorithm: 'btree', columns: [
+        'profileId',
+      ] },
+    ],
+    constraints: [
+      { name: 'rack_profile_source_profile_id_key', constraint: 'unique', columns: ['profileId'] },
+    ],
+  }, RackProfileSourceRow),
   recentObservation: __table({
     name: 'recent_observation',
     indexes: [
@@ -279,6 +305,8 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("abandon_investigation", AbandonInvestigationReducer),
+  __reducerSchema("apply_documented_thresholds", ApplyDocumentedThresholdsReducer),
+  __reducerSchema("assign_rack_equipment", AssignRackEquipmentReducer),
   __reducerSchema("attach_investigation_image", AttachInvestigationImageReducer),
   __reducerSchema("authorize_agent", AuthorizeAgentReducer),
   __reducerSchema("authorize_benchmark_runner", AuthorizeBenchmarkRunnerReducer),

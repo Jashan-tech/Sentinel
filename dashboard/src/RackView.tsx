@@ -6,6 +6,8 @@ import type { Rack } from "./module_bindings/types";
 import { metrics, date } from "./telemetry";
 import { evaluate, validateObservation } from "../../spacetimedb/src/rules";
 import InvestigationPanel from "./InvestigationPanel";
+import EquipmentSpec from "./EquipmentSpec";
+import { catalogEntry } from "../../spacetimedb/src/equipmentCatalog";
 import Icon, { type IconName } from "./Icon";
 
 export default function RackView({
@@ -28,6 +30,10 @@ export default function RackView({
     tables.rackAlert.where((r) => r.rackId.eq(rack.rackId)),
   );
   const [profiles, profilesReady] = useTable(tables.rackProfile);
+  const [equipmentRows] = useTable(
+    tables.rackEquipment.where((r) => r.rackId.eq(rack.rackId)),
+  );
+  const [profileSources] = useTable(tables.rackProfileSource);
   const [mode, setMode] = useState<"live" | "simulation">("live");
   const [freshness, setFreshness] = useState(60);
   const [now, setNow] = useState(Date.now());
@@ -42,6 +48,13 @@ export default function RackView({
     return () => clearInterval(timer);
   }, []);
   const profile = profiles.find((p) => p.profileId === rack.profileId);
+  const assigned = catalogEntry(equipmentRows[0]?.modelId ?? "");
+  const profileSource = profileSources.find((p) => p.profileId === rack.profileId);
+  // Documented-range profiles only make sense on a rack with that server installed.
+  const selectableProfiles = profiles.filter((p) => {
+    const src = profileSources.find((x) => x.profileId === p.profileId);
+    return !src || src.modelId === assigned?.modelId;
+  });
   const ready =
     online && currentReady && historyReady && alertsReady && profilesReady;
   const environmental = metrics.slice(0, 3);
@@ -213,7 +226,7 @@ export default function RackView({
             const reading = current.find((r) => r.metricType === m.id);
             const violation =
               reading && profile
-                ? evaluate(m.id, reading.numericValue, profile)
+                ? evaluate(m.id, reading.numericValue, profile, profileSource ? "manufacturer-documented" : "demonstration")
                 : undefined;
             const old = reading && stale(reading.observedAt);
             return (
@@ -412,7 +425,7 @@ export default function RackView({
               );
             }}
           >
-            {profiles.map((p) => (
+            {selectableProfiles.map((p) => (
               <option key={p.profileId} value={p.profileId}>
                 {p.name}
               </option>
@@ -420,7 +433,7 @@ export default function RackView({
           </select>
         </label>
         <div className="profile-limits">
-          <span>Demo thresholds</span>
+          <span>{profileSource ? "Documented thresholds" : "Demo thresholds"}</span>
           <p>
             <b>{profile?.temperatureWarningC ?? "—"}°</b> warning <span>/</span>{" "}
             <b>{profile?.temperatureCriticalC ?? "—"}°</b> critical{" "}
@@ -428,8 +441,9 @@ export default function RackView({
             warning
           </p>
           <small>
-            Fictional settings · not manufacturer specifications or installed
-            identity
+            {profileSource
+              ? "From the manufacturer's documented inlet range · applied by the operator"
+              : "Fictional settings · not manufacturer specifications or installed identity"}
           </small>
         </div>
         <div className={`rack-status ${level}`} data-testid="rack-status">
@@ -440,9 +454,20 @@ export default function RackView({
           </div>
         </div>
       </section>
+      <EquipmentSpec
+        rackId={rack.rackId}
+        entry={assigned}
+        profile={profile}
+        profileSource={profileSource}
+        current={current}
+        disabled={!ready || pending}
+        commit={commit}
+      />
       <InvestigationPanel
         rack={rack}
         profile={profile}
+        assignedEquipment={assigned}
+        profileSource={profileSource}
         current={current}
         history={history}
         alerts={alerts}

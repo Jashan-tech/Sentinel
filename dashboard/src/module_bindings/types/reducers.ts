@@ -7,6 +7,8 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AbandonInvestigationReducer from "../abandon_investigation_reducer";
+import ApplyDocumentedThresholdsReducer from "../apply_documented_thresholds_reducer";
+import AssignRackEquipmentReducer from "../assign_rack_equipment_reducer";
 import AttachInvestigationImageReducer from "../attach_investigation_image_reducer";
 import AuthorizeAgentReducer from "../authorize_agent_reducer";
 import AuthorizeBenchmarkRunnerReducer from "../authorize_benchmark_runner_reducer";
@@ -29,6 +31,8 @@ import StartInvestigationReducer from "../start_investigation_reducer";
 import StopBenchmarkRunReducer from "../stop_benchmark_run_reducer";
 
 export type AbandonInvestigationParams = __Infer<typeof AbandonInvestigationReducer>;
+export type ApplyDocumentedThresholdsParams = __Infer<typeof ApplyDocumentedThresholdsReducer>;
+export type AssignRackEquipmentParams = __Infer<typeof AssignRackEquipmentReducer>;
 export type AttachInvestigationImageParams = __Infer<typeof AttachInvestigationImageReducer>;
 export type AuthorizeAgentParams = __Infer<typeof AuthorizeAgentReducer>;
 export type AuthorizeBenchmarkRunnerParams = __Infer<typeof AuthorizeBenchmarkRunnerReducer>;

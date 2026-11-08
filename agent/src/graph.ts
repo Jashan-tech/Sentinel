@@ -46,7 +46,7 @@ Fan RPM, CPU load, power, switch errors and hardware health are NOT available.
 
 How to investigate:
 - Decide which evidence would most change your assessment and call the tool for it.
-- Look up the rack profile before judging any reading; thresholds differ per profile and are fictional demo settings.
+- Look up the rack profile before judging any reading; thresholds differ per profile and are fictional demo settings unless the profile says they come from a manufacturer-documented range.
 - When a reading is near or over a threshold, check its history to see if it is rising, stable or falling.
 - Treat stale readings as not current. Treat missing metrics as unknown, never as normal.
 - Stop calling tools when more evidence would not change your conclusion.

@@ -5,6 +5,7 @@ import {
   type MetricType,
   type RackProfile,
   type TelemetryReading,
+  thresholdProvenance,
 } from "./schemas.js";
 
 /** Demonstration heuristics, NOT sensor calibration or manufacturer limits. */
@@ -283,7 +284,7 @@ export function analyzeTrends(
       rack_id: req.rack_id,
       metric_type: metric,
       policy_version: TREND_POLICY.version,
-      thresholds: { ...threshold, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
+      thresholds: { ...threshold, provenance: thresholdProvenance(req.profile) },
       input_observations: all.length,
       rejected_observations: rejected.length,
       omitted_source_series: omittedSources,
@@ -446,7 +447,9 @@ export function earlyWarnings(
             r.numeric_value >= t.thresholds.critical
             ? "CRITICAL"
             : "WARNING",
-          "A fresh supplied observation meets a fictional rack-profile threshold; this is not an equipment fault.",
+          t.thresholds.provenance === "MANUFACTURER_DOCUMENTED_RANGE"
+            ? "A fresh supplied ambient observation meets a threshold the operator set from the manufacturer's documented inlet range; ambient air is not inlet temperature, so this is not an equipment fault or a compliance verdict."
+            : "A fresh supplied observation meets a fictional rack-profile threshold; this is not an equipment fault.",
           ["Equipment condition and sensor placement verification"],
           "Verify sensor placement and repeat the environmental measurement.",
           { ...details, thresholds: t.thresholds },

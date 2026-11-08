@@ -237,6 +237,14 @@ export const RackAlert = __t.object("RackAlert", {
 });
 export type RackAlert = __Infer<typeof RackAlert>;
 
+export const RackEquipment = __t.object("RackEquipment", {
+  rackId: __t.string(),
+  modelId: __t.string(),
+  assignedBy: __t.identity(),
+  assignedAt: __t.timestamp(),
+});
+export type RackEquipment = __Infer<typeof RackEquipment>;
+
 export const RackProfile = __t.object("RackProfile", {
   profileId: __t.string(),
   name: __t.string(),
@@ -248,6 +256,18 @@ export const RackProfile = __t.object("RackProfile", {
   createdAt: __t.timestamp(),
 });
 export type RackProfile = __Infer<typeof RackProfile>;
+
+export const RackProfileSource = __t.object("RackProfileSource", {
+  profileId: __t.string(),
+  modelId: __t.string(),
+  docId: __t.string(),
+  sourceTitle: __t.string(),
+  sourceUrl: __t.string(),
+  section: __t.string(),
+  accessDate: __t.string(),
+  mapping: __t.string(),
+});
+export type RackProfileSource = __Infer<typeof RackProfileSource>;
 
 export const RecentObservation = __t.object("RecentObservation", {
   observationId: __t.u64(),

@@ -20,6 +20,7 @@ import {
   type BenchState,
 } from "./benchmark";
 import { validateObservation, evaluate, fairEvictions } from "./rules";
+import { catalogEntry, documentedThresholds } from "./equipmentCatalog";
 import {
   validateInvestigationStart,
   validateInvestigationCompletion,
@@ -154,6 +155,26 @@ const spacetimedb = schema({
       kind: t.string(),
       recordedBy: t.identity(),
       recordedAt: t.timestamp(),
+    },
+  ),
+  // Installed server per rack, chosen by the operator from the sourced catalog (equipmentCatalog.ts).
+  rackEquipment: table(
+    { public: true },
+    { rackId: t.string().primaryKey(), modelId: t.string(), assignedBy: t.identity(), assignedAt: t.timestamp() },
+  ),
+  // Provenance of profiles whose thresholds come from a manufacturer's documented range
+  // (profiles without a row here are fictional demonstration settings).
+  rackProfileSource: table(
+    { public: true },
+    {
+      profileId: t.string().primaryKey(),
+      modelId: t.string(),
+      docId: t.string(),
+      sourceTitle: t.string(),
+      sourceUrl: t.string(),
+      section: t.string(),
+      accessDate: t.string(),
+      mapping: t.string(),
     },
   ),
   // Live progress of a RUNNING investigation, written only by the authorized agent and deleted
@@ -358,7 +379,8 @@ function reevaluate(ctx: Ctx, rackId: string, metricType: string) {
   const key = `${rackId}:${metricType}`;
   const current = ctx.db.currentTelemetry.currentKey.find(key);
   if (!current) return; // Absence is never evidence of health.
-  const result = evaluate(metricType, current.numericValue, profile);
+  const documented = Boolean(ctx.db.rackProfileSource.profileId.find(profile.profileId));
+  const result = evaluate(metricType, current.numericValue, profile, documented ? "manufacturer-documented" : "demonstration");
   const existing = ctx.db.rackAlert.alertId.find(key);
   if (result) {
     const row = {
@@ -437,11 +459,76 @@ export const changeRackProfile = spacetimedb.reducer(
     if (!rack) throw new SenderError("Unknown rack");
     if (!ctx.db.rackProfile.profileId.find(profileId))
       throw new SenderError("Unknown rack profile");
+    const source = ctx.db.rackProfileSource.profileId.find(profileId);
+    if (source && ctx.db.rackEquipment.rackId.find(rackId)?.modelId !== source.modelId)
+      throw new SenderError("A documented-range profile can only be used on a rack with that server assigned");
     ctx.db.rack.rackId.update({ ...rack, profileId });
     for (const current of ctx.db.currentTelemetry.rackId.filter(rackId))
       reevaluate(ctx, rackId, current.metricType);
   },
 );
+
+// ---- Installed equipment (operator-assigned, from the sourced catalog) ----
+function setRackProfile(ctx: Ctx, rackId: string, profileId: string) {
+  const rack = ctx.db.rack.rackId.find(rackId)!;
+  ctx.db.rack.rackId.update({ ...rack, profileId });
+  for (const current of ctx.db.currentTelemetry.rackId.filter(rackId)) reevaluate(ctx, rackId, current.metricType);
+}
+
+/** Assign (or clear, with modelId "") the server installed in a rack. */
+export const assignRackEquipment = spacetimedb.reducer(
+  { rackId: t.string(), modelId: t.string() },
+  (ctx, { rackId, modelId }) => {
+    const rack = ctx.db.rack.rackId.find(rackId);
+    if (!rack) throw new SenderError("Unknown rack");
+    if (modelId && !catalogEntry(modelId)) throw new SenderError("Unknown server model; choose one from the catalog");
+    const existing = ctx.db.rackEquipment.rackId.find(rackId);
+    if (!modelId) ctx.db.rackEquipment.rackId.delete(rackId);
+    else {
+      const row = { rackId, modelId, assignedBy: ctx.sender, assignedAt: ctx.timestamp };
+      if (existing) ctx.db.rackEquipment.rackId.update(row);
+      else ctx.db.rackEquipment.insert(row);
+    }
+    // Thresholds documented for a different server must not stay on this rack.
+    const source = ctx.db.rackProfileSource.profileId.find(rack.profileId);
+    if (source && source.modelId !== modelId) setRackProfile(ctx, rackId, "standard");
+  },
+);
+
+/** Opt-in: create (or refresh) the sourced profile for the rack's server and apply it to the rack. */
+export const applyDocumentedThresholds = spacetimedb.reducer({ rackId: t.string() }, (ctx, { rackId }) => {
+  if (!ctx.db.rack.rackId.find(rackId)) throw new SenderError("Unknown rack");
+  const assigned = ctx.db.rackEquipment.rackId.find(rackId);
+  if (!assigned) throw new SenderError("Assign the installed server first");
+  const entry = catalogEntry(assigned.modelId);
+  if (!entry) throw new SenderError("Unknown server model");
+  const d = documentedThresholds(entry);
+  const profile = {
+    profileId: d.profileId,
+    name: d.name,
+    description: `Manufacturer-documented range from ${entry.source.title} (${entry.source.section}). ${d.mapping} Documented for server inlet air at ≤ 900 m / sea level; rover ambient air is not inlet temperature.`,
+    equipmentType: entry.equipmentType,
+    temperatureWarningC: d.temperatureWarningC,
+    temperatureCriticalC: d.temperatureCriticalC,
+    humidityWarningPercent: d.humidityWarningPercent,
+    createdAt: ctx.timestamp,
+  };
+  if (ctx.db.rackProfile.profileId.find(d.profileId)) ctx.db.rackProfile.profileId.update(profile);
+  else ctx.db.rackProfile.insert(profile);
+  const source = {
+    profileId: d.profileId,
+    modelId: entry.modelId,
+    docId: entry.docId,
+    sourceTitle: entry.source.title,
+    sourceUrl: entry.source.url,
+    section: entry.source.section,
+    accessDate: entry.source.accessDate,
+    mapping: d.mapping,
+  };
+  if (ctx.db.rackProfileSource.profileId.find(d.profileId)) ctx.db.rackProfileSource.profileId.update(source);
+  else ctx.db.rackProfileSource.insert(source);
+  setRackProfile(ctx, rackId, d.profileId);
+});
 
 // ---- AI investigation records ----
 // One row per investigation. Terminal rows are never overwritten; the newest

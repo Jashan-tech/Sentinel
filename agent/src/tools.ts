@@ -14,6 +14,7 @@ import {
   RackId,
   type InvestigationRequest,
   type TelemetryReading,
+  thresholdProvenance,
 } from "./schemas.js";
 
 export const MAX_HISTORY_LIMIT = 50;
@@ -214,7 +215,10 @@ export function createSnapshotDataSource(
         equipment_type: snap.equipment_type,
         equipment_identity: snap.equipment_identity ?? null,
         profile: snap.profile,
-        note: "Thresholds are fictional demonstration settings, not manufacturer specifications.",
+        threshold_provenance: thresholdProvenance(snap.profile),
+        note: snap.profile.threshold_source
+          ? `Thresholds were set by the operator from the manufacturer's documented range (${snap.profile.threshold_source.manufacturer} ${snap.profile.threshold_source.model}, ${snap.profile.threshold_source.doc_id}): ${snap.profile.threshold_source.mapping} They describe server inlet air; rover ambient air is not inlet temperature.`
+          : "Thresholds are fictional demonstration settings, not manufacturer specifications.",
       };
     },
   };
@@ -283,7 +287,7 @@ export function createTools(ds: RackDataSource) {
     tool(({ rack_id }) => run(() => ds.getRackProfile(rack_id)), {
       name: "get_rack_profile",
       description:
-        "Get the rack's equipment type and configured (fictional demo) warning/critical thresholds.",
+        "Get the rack's equipment type, configured warning/critical thresholds and their provenance (fictional demo settings unless set from a manufacturer-documented range).",
       schema: z.object({ rack_id: RackId }),
     }),
     tool(

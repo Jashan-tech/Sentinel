@@ -256,6 +256,30 @@ See [the full equipment-intelligence contract and source registry](agent/EQUIPME
 
 ---
 
+## Installed equipment and documented ranges
+
+Each rack can be assigned the server that is actually installed in it, chosen on the Rack Monitor from five servers. Their environmental specifications were read from the manufacturers' own documentation on 2026-11-08:
+
+| Server | Standard operating | Highest documented | Operating humidity | Source |
+|---|---|---|---|---|
+| Dell PowerEdge R760 | 10–35 °C (ASHRAE A2, ≤ 900 m) | 45 °C (A4, 1% annual runtime) | 8–80% RH, 21 °C max dew point | [Installation and Service Manual](https://www.dell.com/support/manuals/en-us/poweredge-r760/per760_ism_pub/environmental-specifications?guid=guid-11193b30-1caa-4e7b-900f-bc79a66398ad&lang=en-us) |
+| HPE ProLiant DL360 Gen11 | 10–35 °C (sea level) | 45 °C (approved configurations) | 8–90% RH (dew-point bounded) | [Server User Guide](https://support.hpe.com/hpesc/public/docDisplay?docId=sd00002444en_us&page=GUID-F3AAB60A-8A77-40E2-8DB6-B4D1B52ABFB9.html) |
+| Lenovo ThinkSystem SR650 V3 | 10–35 °C (A2) | 45 °C (A4; shuts down above) | 20–80% RH, 21 °C max dew point | [Lenovo Docs](https://pubs.lenovo.com/sr650-v3/server_specifications_environmental) |
+| Cisco UCS C220 M7 | 10–35 °C (A2) | none above standard | 10–90% RH | [Installation and Service Guide](https://www.cisco.com/c/en/us/td/docs/unified_computing/ucs/c/hw/C220M7/install/b-c220-m7-installation-guide/m-specifications.html) |
+| Supermicro SYS-621C-TN12R | 10–35 °C (A2) | none above standard | 8–80% RH, 21 °C max dew point | [Datasheet](https://www.supermicro.com/en/products/system/datasheet/sys-621c-tn12r) |
+
+- **Reference card:** the Rack Monitor shows the assigned server's documented ranges with source, section and access date. It places the live ambient and humidity readings within, above or below those ranges. This is labelled reference only: documented limits are for server *inlet* air, and the rover measures ambient air near the rack.
+- **Opt-in thresholds:** **Use documented range as thresholds** creates a sourced profile:
+  - The warning is the documented standard upper limit.
+  - The critical threshold is the highest documented limit.
+  - For servers documented only to 35 °C (Cisco, Supermicro), 35 °C is critical and there is no invented warning tier.
+  - The humidity warning is the documented operating maximum.
+  - Alerts then say "manufacturer-documented" and repeat the ambient-versus-inlet caveat. Changing the installed server drops another server's documented profile.
+- **Investigations:** investigations use the assigned server automatically. The Documentation Agent gets an exact knowledge-base match (`agent/src/fixtures/docs/equipment-docs.json`), and threshold provenance in the evidence becomes `MANUFACTURER_DOCUMENTED_RANGE`.
+- **Single source of truth:** `spacetimedb/src/equipmentCatalog.ts` holds the catalog. A test keeps it consistent with the agent's knowledge base.
+
+---
+
 ## Fleet benchmark
 
 The **Fleet Simulation** page measures how SpacetimeDB behaves as SENTINEL scales from one simulated rover to thousands. **No performance number is hardcoded, estimated or produced in the browser.** Each value on the page is read from rows that an external load generator stored after measuring real reducer calls and real subscriptions against the running database. A value that can't be measured shows as *Not measured* or *Insufficient samples*.
@@ -373,6 +397,10 @@ scripts/              CLI helper, backend integration test, browser tests, live 
 - Manufacturer guidance is limited to the exact supported identities in the curated source registry. Unknown identities receive NO_MATCH. Rover ambient telemetry cannot automatically establish manufacturer operating compliance.
 - Access control is suitable only for a local demo.
 - `npm run test:browser`, `npm run test:equipment-e2e` and `scripts/mission-control-e2e.ts` default to Microsoft Edge. Set `E2E_BROWSER_CHANNEL=chrome` to use Chrome.
+- **Documented ranges:**
+  - They assume ≤ 900 m or sea level. Altitude derating and configuration-specific limits (CPUs, GPUs, options) are shown as notes, not applied.
+  - Only upper thresholds drive alerts; documented minimums are shown for reference.
+  - Lenovo's product guide (LP1601) lists an 8% A2 humidity minimum where Lenovo Docs lists 20%; the catalog uses Lenovo Docs.
 - **Fleet benchmark:**
   - **Same machine:** the generator, its subscribers and the server share one machine and one Node.js process. Latency therefore includes the generator's own event-loop delay (reported per stage). At high rates, the generator rather than SpacetimeDB may be the limit.
   - **Latency scope:** latency is a local loopback figure and says nothing about rover radio links or remote networks.
