@@ -339,6 +339,12 @@ async function spin(dir: "left" | "right", ms: number) {
   const sp = dir === "right" ? TURN_SPEED : -TURN_SPEED;
   return driveLR(sp, -sp, Math.round(ms * (dir === "right" ? TURN_RIGHT_SCALE : TURN_LEFT_SCALE)));
 }
+/** Forward drive (not recorded) that the rover itself stops if anything gets within MIN_CM. */
+async function guardedForward(ms: number) {
+  const r = await roverText(`/approach?target=${MIN_CM}&speed=${APPROACH_SPEED}&max_ms=${ms}`, 20_000);
+  if (r.includes("reason=no-distance")) await drive(APPROACH_SPEED, ms); // sensor offline: fall back to time
+  else if (r.includes("reason=reached")) log(`Stopped: something ${(await sensors()).dist_cm} cm ahead.`);
+}
 /** Undo the trail in reverse order (forward <-> back, left <-> right). */
 async function returnHome() {
   if (!trail.length) return;
@@ -348,7 +354,7 @@ async function returnHome() {
   trail = [];
   for (const st of steps) {
     if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
-    else if ("back" in st) await drive(APPROACH_SPEED, st.back);
+    else if ("back" in st) await guardedForward(st.back);
     else if ("turn" in st) await spin(st.turn === "right" ? "left" : "right", st.ms ?? TURN_MS);
     await sleep(250);
   }
@@ -465,10 +471,10 @@ const LOOK_PROMPT =
   "rack_w: the rack / box width as a fraction of the frame width (null if none). " +
   "reason: one short plain-English sentence explaining what you see.";
 /** Ask Nemotron about the current frame; retries if the network or the model's answer glitches. */
-async function look(): Promise<Look> {
+async function look(b64?: string): Promise<Look> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await lookOnce();
+      return await lookOnce(b64);
     } catch (e) {
       if (attempt >= 3) throw e;
       log(`Vision check glitched (${(e as Error).message.slice(0, 80)}); retrying.`, true);
@@ -491,11 +497,14 @@ function parseLook(text: string): { view?: string; full_rack_visible?: boolean; 
     rack_w: numOf("rack_w"),
   };
 }
-async function lookOnce(): Promise<Look> {
+async function lookOnce(given?: string): Promise<Look> {
   if (!NVIDIA_API_KEY) throw new Error("NVIDIA_API_KEY missing in agent/.env");
-  const res = await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`rover /snap -> HTTP ${res.status}`);
-  const b64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+  let b64 = given;
+  if (!b64) {
+    const res = await fetch(`${ROVER_URL}/snap`, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`rover /snap -> HTTP ${res.status}`);
+    b64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+  }
   const r = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${NVIDIA_API_KEY}`, "content-type": "application/json" },
@@ -556,7 +565,7 @@ async function undoLast() {
   const st = trail.pop();
   if (!st) return;
   if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
-  else if ("back" in st) await drive(APPROACH_SPEED, st.back);
+  else if ("back" in st) await guardedForward(st.back);
   else if ("turn" in st) await spin(st.turn === "right" ? "left" : "right", st.ms ?? TURN_MS);
 }
 
@@ -904,8 +913,21 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   const finish = async (where: string, found: boolean) => {
     log(found ? `${where}: exposed wiring found. Taking the inspection photo.` : `${where}: could not get the wiring in view; taking the photo anyway.`);
     phase("taking photo", rackId);
-    const image = await photo();
+    let image = await photo();
     log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
+    // VERIFY: Nemotron checks the exact photo that will be sent. Retake (with a small search) if it misses the wires.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      phase("checking the photo", rackId);
+      const v = await look(image.base64);
+      status.last_look = { t: new Date().toLocaleTimeString(), where: `${where} (photo check)`, view: VIEW_LABEL[v.view], rack: v.rack_visible, full: v.full_rack_visible, wires: v.wires_visible, reason: v.reason, img: image.thumbnailDataUrl };
+      if (v.view === "OPEN_RACK_CABLES") { log(`Photo check passed: ${v.reason}`); break; }
+      log(`Photo check failed (${VIEW_LABEL[v.view]}): ${v.reason}`);
+      if (attempt === 3) { log("Sending the best photo we have; the report will say the wiring was not clearly captured."); break; }
+      log("Looking again before retaking the photo.");
+      await findWiresNearby(`${where} (retake)`, true, false, 20);
+      image = await photo();
+      log(`retake ${attempt}: ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
+    }
     phase("reading sensors", rackId);
     for (let i = 0; i < SENSOR_SAMPLES; i++) {
       try {
