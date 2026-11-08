@@ -766,6 +766,7 @@ const ROUTE = {
   diagDeg: Number(env("ROUTE_DIAG_DEG", "45")),
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
   faceDeg: Number(env("ROUTE_FACE_DEG", "90")),
+  faceRightDeg: Number(env("ROUTE_FACE_RIGHT_DEG", "105")), // a bit more so the wired side fills the photo
   pauseMs: Number(env("ROUTE_PAUSE_MS", "2000")),
   aim: env("ROUTE_AIM", "off") === "on", // camera aiming with Nemotron at each stop (off = fully fixed route)
 };
@@ -828,7 +829,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log("Checking the right side.");
   await turn("right", degMs(ROUTE.diagDeg)); await sleep(300);
   await fwd(cmToMs(ROUTE.diagCm)); await sleep(300);
-  await turn("left", degMs(ROUTE.faceDeg)); await sleep(500);
+  await turn("left", degMs(ROUTE.faceRightDeg)); await sleep(500);
   if (ROUTE.aim) { phase("aiming at the box", rackId); await centre("right side", "left"); }
   phase("taking photo", rackId);
   await showView("right side", "open rack with exposed cabling (TARGET)", "Right side: exposed wiring found. Taking the inspection photo.", true);
