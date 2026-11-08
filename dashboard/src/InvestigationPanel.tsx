@@ -32,7 +32,7 @@ import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
 
 const AGENT_URL = "/api/agent/investigate"; // Vite proxy -> agent service (port 3001); no API key in the browser
-const CLIENT_TIMEOUT_MS = 180_000; // includes visual investigation budget and synthesis
+const CLIENT_TIMEOUT_MS = 300_000; // includes visual investigation budget and synthesis
 const ABANDONED_AFTER_MS = 5 * 60_000; // RUNNING rows older than this no longer block new runs
 
 function parse<T>(json: string, fallback: T): T {

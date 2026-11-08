@@ -297,7 +297,7 @@ async function investigate(db: DbConnection, rackId: string, image: ImageAttachm
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ investigation_id: investigationId, images: "images" in request ? request.images : [] }),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(300_000),
     });
     const body = (await res.json().catch(() => null)) as { report?: { severity?: string; headline?: string; summary?: string }; persisted?: boolean; error?: string; message?: string } | null;
     if (!body?.report) throw new Error(body?.message ?? body?.error ?? `agent HTTP ${res.status}`);
