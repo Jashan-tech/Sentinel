@@ -290,3 +290,64 @@ test("7: a stateless request is cancelled when the client disconnects", async ()
   assert.ok(aborted, "the in-flight model call received the cancellation");
   assert.ok(Date.now() - t0 < 3000);
 });
+
+// ============ Token efficiency (live measurement: verification and routing dominated usage) ============
+test("efficiency: a repeated verification with no new findings is skipped", async () => {
+  const req = InvestigationRequest.parse(rawFixture("c-critical"));
+  const v = json({ grounded: true, verified_findings: ["35.4 °C exceeds 33 °C"], unsupported_claims: [], contradictions: [], missing_evidence: [], request_more_investigation: false });
+  const { report } = await runMultiAgentInvestigation(req, {
+    supervisorModel: fakeModel([decide("telemetry", "t", "p"), decide("verification", "v1"), decide("verification", "v2 again"), synthesis]).model,
+    specialistModel: fakeModel([finding, v]).model, supervisorModelName: "s", specialistModelName: "s",
+    dataSource: createSnapshotDataSource(req, { staleAfterMinutes: 15 }), staleAfterMinutes: 15,
+    maxDelegations: 5, maxSpecialistToolRounds: 3, maxVerificationRetries: 1, maxInvestigationSeconds: 90,
+  });
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "verification"]);
+  assert.equal(report.verification_outcome, "VERIFIED");
+});
+
+test("efficiency: a FAILED verification may still be retried", async () => {
+  const req = InvestigationRequest.parse(rawFixture("c-critical"));
+  const v = json({ grounded: true, verified_findings: ["35.4 °C exceeds 33 °C"], unsupported_claims: [], contradictions: [], missing_evidence: [], request_more_investigation: false });
+  const { report } = await runMultiAgentInvestigation(req, {
+    supervisorModel: fakeModel([decide("telemetry", "t", "p"), decide("verification", "v1"), decide("verification", "retry"), decide("finish"), synthesis]).model,
+    specialistModel: fakeModel([finding, new Error("503 down"), v]).model, supervisorModelName: "s", specialistModelName: "s",
+    dataSource: createSnapshotDataSource(req, { staleAfterMinutes: 15 }), staleAfterMinutes: 15,
+    maxDelegations: 5, maxSpecialistToolRounds: 3, maxVerificationRetries: 1, maxInvestigationSeconds: 90,
+  });
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "verification", "verification"]);
+  assert.equal(report.verification_outcome, "VERIFIED");
+});
+
+test("efficiency: later Supervisor prompts carry a compact digest; verification gets code-computed evidence", async () => {
+  const req = InvestigationRequest.parse(rawFixture("c-critical"));
+  const sup = fakeModel([decide("telemetry", "t", "p"), decide("verification", "v"), decide("finish"), synthesis]);
+  const spec = fakeModel([finding, json({ grounded: true, verified_findings: [], unsupported_claims: [], contradictions: [], missing_evidence: [], request_more_investigation: false })]);
+  const { report } = await runMultiAgentInvestigation(req, {
+    supervisorModel: sup.model, specialistModel: spec.model, supervisorModelName: "s", specialistModelName: "s",
+    dataSource: createSnapshotDataSource(req, { staleAfterMinutes: 15 }), staleAfterMinutes: 15,
+    maxDelegations: 5, maxSpecialistToolRounds: 3, maxVerificationRetries: 1, maxInvestigationSeconds: 90,
+  });
+  const size = (i: number) => String(sup.calls[i][1].content).length;
+  assert.match(String(sup.calls[0][1].content), /policy_version/, "first decision sees full evidence");
+  assert.doesNotMatch(String(sup.calls[1][1].content), /policy_version/, "later decisions see the digest");
+  assert.match(String(sup.calls[1][1].content), /compact digest/);
+  assert.ok(size(1) < size(0), `later prompt ${size(1)} should be smaller than first ${size(0)}`);
+  const verifyPrompt = String(spec.calls[1][1].content);
+  assert.match(verifyPrompt, /Code-computed evidence/);
+  assert.match(verifyPrompt, /"direction"/);
+  assert.match(verifyPrompt, /FICTIONAL_DEMO_CONFIGURATION/);
+  assert.equal((report.evidence.configured_thresholds as any).provenance, "FICTIONAL_DEMO_CONFIGURATION");
+});
+
+test("efficiency: verification requested before any findings is redirected (photo -> vision, else telemetry)", async () => {
+  const req = InvestigationRequest.parse(rawFixture("c-critical"));
+  const v = json({ grounded: true, verified_findings: ["35.4 °C exceeds 33 °C"], unsupported_claims: [], contradictions: [], missing_evidence: [], request_more_investigation: false });
+  const { report, events } = await runMultiAgentInvestigation(req, {
+    supervisorModel: fakeModel([decide("verification", "verify first", "p"), decide("verification", "v"), decide("finish"), synthesis]).model,
+    specialistModel: fakeModel([finding, v]).model, supervisorModelName: "s", specialistModelName: "s",
+    dataSource: createSnapshotDataSource(req, { staleAfterMinutes: 15 }), staleAfterMinutes: 15,
+    maxDelegations: 5, maxSpecialistToolRounds: 3, maxVerificationRetries: 1, maxInvestigationSeconds: 90,
+  });
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "verification"]);
+  assert.ok(events.some((e) => e.type === "GUARD" && /Nothing to verify yet/.test(e.description)));
+});

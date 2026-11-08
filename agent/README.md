@@ -266,6 +266,23 @@ Tool results are capped at 8,000 characters. If a result would be longer, the ol
 
 The Supervisor picks the sequence each time, so it can differ between runs.
 
+## Latency and token use (measured live)
+
+These figures come from live runs of `nvidia/nemotron-3.5-super-vl-120b-a12b` on the critical-rack scenario, using NVIDIA's own usage counts. Runs vary with how many agents the Supervisor chooses.
+
+| Scenario | Before the efficiency changes | After |
+|---|---|---|
+| Telemetry only | 57.9 s, 114.7k input / 6.8k output tokens | 52.3 s, 83.7k / 6.2k |
+| Telemetry + photo | 104.6 s, 187.9k / 11.1k (INCOMPLETE) | 63.0 s, 93.0k / 6.6k |
+
+What changed:
+- The Supervisor gets the full code-computed monitoring evidence only for its first decision, then a compact digest.
+- Verification receives that evidence up front and calls tools only for what it doesn't cover.
+- A repeated verification is skipped when nothing new has been found since the last completed one; a retry after a failed verification is still allowed.
+- A verification requested before any findings exist is redirected to Vision, or to Telemetry if there's no uninspected photo.
+
+Verification and Supervisor routing remain the largest token consumers.
+
 ## Known limitations
 
 - Tools read from the snapshot sent with the request. They are not yet wired to SpacetimeDB.

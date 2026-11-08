@@ -153,7 +153,7 @@ Give 3-10 visual_findings. Be concise.`,
 
   verification: `You are the VERIFICATION AGENT of SENTINEL, an independent reviewer.
 You receive findings written by other agents. Do NOT restate them; judge them.
-- Spot-check factual claims with current telemetry/history; verify every trend using analyze_telemetry_trends and indicators. Verify manufacturer citations and applicability with lookup_equipment_documentation and get_rack_profile. Reject numerical calculations or model identities not returned by these tools.
+- Code-computed thresholds, trends, early-warning indicators and the documentation match are given to you; they are authoritative. Check trend claims against them; call analyze_telemetry_trends only for a source they do not cover. Spot-check specific readings with current telemetry/history, and manufacturer citations with lookup_equipment_documentation. Reject numerical calculations or model identities not supported by this evidence or your tools.
 - Flag claims not supported by tool data, root-cause claims stated as fact, and contradictions between agents or with the data.
 - List evidence that is missing for the conclusions drawn.
 - Only list a claim in verified_findings if the tool data supports it.
@@ -221,6 +221,49 @@ Rules:
   them separate from measured telemetry. A visual observation is never a confirmed fault or cause.`;
 
 // ---------------------------------------------------------------- helpers
+
+/** Compact, code-computed monitoring digest for repeated prompts (full detail stays in the report evidence). */
+export function compactMonitoring(trends: any[], indicators: any[], documentationMatch: any) {
+  const r2 = (v: unknown) => (typeof v === "number" ? Math.round(v * 100) / 100 : v);
+  return {
+    trends: trends
+      .filter((t) => t.series?.length)
+      .map((t) => ({
+        metric: t.metric_type,
+        thresholds: { warning: t.thresholds?.warning ?? null, critical: t.thresholds?.critical ?? null, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
+        series: t.series.map((s: any) => ({
+          source: s.source_identifier,
+          provenance: s.provenance,
+          n: s.observation_count,
+          window: [s.observation_window?.first_observed_at, s.observation_window?.last_observed_at],
+          first: r2(s.first_value),
+          last: r2(s.last_value),
+          min: r2(s.minimum),
+          max: r2(s.maximum),
+          direction: s.direction,
+          stale: s.stale,
+          warning_violations: s.threshold_violations,
+          critical_violations: s.critical_violations,
+          data_quality: s.data_quality,
+        })),
+        omitted_source_series: t.omitted_source_series || undefined,
+      })),
+    indicators: indicators.map((i) => ({
+      metric: i.metric,
+      classification: i.classification,
+      severity: i.severity,
+      rule: i.triggering_rule,
+      source: i.observed_evidence?.source_identifier ?? null,
+    })),
+    documentation_match: documentationMatch
+      ? Object.fromEntries(
+          ["match_status", "manufacturer_specification_available", "matched_manufacturer", "matched_model", "reason"]
+            .filter((k) => k in documentationMatch)
+            .map((k) => [k, documentationMatch[k]]),
+        )
+      : null,
+  };
+}
 
 /** Evidence identity of one reading: id (when known), provenance, value, unit and both timestamps. */
 export const readingKey = (m: any) =>
@@ -403,7 +446,8 @@ export async function runMultiAgentInvestigation(
   const evidence: Evidence = {
     measurements: [],
     history: [],
-    configured_thresholds: null,
+    // Known by code from the request; never depends on which tools an agent happened to call.
+    configured_thresholds: { ...request.profile, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
     documentation: [],
     images: images.map((i) => i.provenance),
     trends: deterministicTrends,
@@ -434,6 +478,8 @@ export async function runMultiAgentInvestigation(
     deterministicIndicators.some(
       (i) => i.classification === "EARLY_WARNING_TREND",
     );
+  const monitoringFull = clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 12000);
+  const monitoringCompact = clip(JSON.stringify(compactMonitoring(deterministicTrends, deterministicIndicators, documentationMatch)), 5000);
   const hasContent = (f: SpecialistFinding) =>
     f.observations.length > 0 ||
     f.hypotheses.length > 0 ||
@@ -792,7 +838,7 @@ export async function runMultiAgentInvestigation(
 Inspection requested by operator: ${inspectionMode}. ${imageLine}
 Active alerts: ${request.active_alerts.length ? request.active_alerts.map((a) => `[${a.severity}] ${a.message}`).join("; ") : "none"}
 Equipment identity: ${JSON.stringify(request.equipment_identity ?? null)} (operator assertion only; profile/photo never establishes identity).
-Deterministic monitoring evidence: ${clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 12000)}
+Deterministic monitoring evidence${state.delegations === 0 ? "" : " (compact digest; full detail was given in your first decision)"}: ${state.delegations === 0 ? monitoringFull : monitoringCompact}
 Data inventory (counts only): ${JSON.stringify(dataInventory(request, opts.staleAfterMinutes))}
 Budget: ${state.delegations}/${opts.maxDelegations} delegations used; verification runs ${state.verificationRuns}/${opts.maxVerificationRetries + 1}; ~${Math.round(remaining() / 1000)}s left.
 Your plan so far: ${state.plan || "(none yet - include a plan)"}
@@ -871,6 +917,27 @@ Decide the next step.`;
           "MAX_VERIFICATION_RETRIES",
         ),
       };
+    }
+    // Re-running a COMPLETED verification over the same findings changes nothing and doubles its cost
+    // (seen live: verification -> verification with no new findings in between).
+    if (
+      next === "verification" &&
+      state.verificationRuns > 0 &&
+      state.verificationResult?.status === "COMPLETED" &&
+      unverified(state).length === 0
+    ) {
+      emit("GUARD", "No new findings since the last completed verification; not re-running it", "INFO", { agent: "supervisor" });
+      next = "finish";
+      objective = "";
+    }
+    // Verifying before any agent has produced findings checks nothing (seen live: verification ran first).
+    if (next === "verification" && !state.findings.some(hasContent)) {
+      next = images.length && !visionRan ? "vision" : "telemetry";
+      objective =
+        next === "vision"
+          ? "Inspect the operator-supplied photograph and report what is directly visible."
+          : "Check current readings and their freshness against the rack profile thresholds.";
+      emit("GUARD", `Nothing to verify yet; routing to ${next} first`, "INFO", { agent: "supervisor" });
     }
     if (next === "vision" && !images.length) {
       emit(
@@ -1105,7 +1172,12 @@ Decide the next step.`;
     emit("AGENT", `verification agent started: ${objective}`, "INFO", {
       agent: "verification",
     });
-    const verifyText = `${rackHeader}\nObjective: ${objective}\nFindings to review:\n${findingsDigest(state.findings, null)}`;
+    const verifyText = `${rackHeader}\nObjective: ${objective}
+Code-computed evidence (authoritative; computed deterministically from the snapshot, not by any agent):
+configured thresholds: ${JSON.stringify(evidence.configured_thresholds)}
+monitoring: ${monitoringCompact}
+Use tools only for claims this evidence does not cover (specific readings or samples, documentation citations, another source).
+Findings to review:\n${findingsDigest(state.findings, null)}`;
     const withImage =
       images.length > 0 &&
       state.findings.some(
