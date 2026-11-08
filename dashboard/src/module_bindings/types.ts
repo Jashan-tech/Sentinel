@@ -201,6 +201,15 @@ export const InvestigationImage = __t.object("InvestigationImage", {
 });
 export type InvestigationImage = __Infer<typeof InvestigationImage>;
 
+export const InvestigationProgress = __t.object("InvestigationProgress", {
+  investigationId: __t.string(),
+  rackId: __t.string(),
+  phase: __t.string(),
+  stepsJson: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type InvestigationProgress = __Infer<typeof InvestigationProgress>;
+
 export const ModuleSetting = __t.object("ModuleSetting", {
   key: __t.string(),
   value: __t.string(),

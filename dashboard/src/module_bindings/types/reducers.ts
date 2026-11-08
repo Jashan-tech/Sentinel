@@ -18,6 +18,7 @@ import CompleteInvestigationReducer from "../complete_investigation_reducer";
 import FinishBenchmarkRunReducer from "../finish_benchmark_run_reducer";
 import IngestSimulatedObservationReducer from "../ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "../initialize_demo_reducer";
+import RecordInvestigationProgressReducer from "../record_investigation_progress_reducer";
 import RegisterBenchmarkRunnerReducer from "../register_benchmark_runner_reducer";
 import ReportBenchmarkSampleReducer from "../report_benchmark_sample_reducer";
 import ReportBenchmarkStageReducer from "../report_benchmark_stage_reducer";
@@ -39,6 +40,7 @@ export type CompleteInvestigationParams = __Infer<typeof CompleteInvestigationRe
 export type FinishBenchmarkRunParams = __Infer<typeof FinishBenchmarkRunReducer>;
 export type IngestSimulatedObservationParams = __Infer<typeof IngestSimulatedObservationReducer>;
 export type InitializeDemoParams = __Infer<typeof InitializeDemoReducer>;
+export type RecordInvestigationProgressParams = __Infer<typeof RecordInvestigationProgressReducer>;
 export type RegisterBenchmarkRunnerParams = __Infer<typeof RegisterBenchmarkRunnerReducer>;
 export type ReportBenchmarkSampleParams = __Infer<typeof ReportBenchmarkSampleReducer>;
 export type ReportBenchmarkStageParams = __Infer<typeof ReportBenchmarkStageReducer>;

@@ -220,6 +220,8 @@ export interface AgentEvent {
 export interface AgentReport {
   rack_id: string;
   severity: string;
+  /** One plain-language AI sentence for the main finding (absent on older reports). */
+  headline?: string;
   summary: string;
   investigation_status: string;
   hypotheses: {

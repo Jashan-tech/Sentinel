@@ -46,6 +46,7 @@ import CompleteInvestigationReducer from "./complete_investigation_reducer";
 import FinishBenchmarkRunReducer from "./finish_benchmark_run_reducer";
 import IngestSimulatedObservationReducer from "./ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "./initialize_demo_reducer";
+import RecordInvestigationProgressReducer from "./record_investigation_progress_reducer";
 import RegisterBenchmarkRunnerReducer from "./register_benchmark_runner_reducer";
 import ReportBenchmarkSampleReducer from "./report_benchmark_sample_reducer";
 import ReportBenchmarkStageReducer from "./report_benchmark_stage_reducer";
@@ -68,6 +69,7 @@ import CurrentTelemetryRow from "./current_telemetry_table";
 import InvestigationRow from "./investigation_table";
 import InvestigationCompletionRow from "./investigation_completion_table";
 import InvestigationImageRow from "./investigation_image_table";
+import InvestigationProgressRow from "./investigation_progress_table";
 import RackRow from "./rack_table";
 import RackAlertRow from "./rack_alert_table";
 import RackProfileRow from "./rack_profile_table";
@@ -205,6 +207,20 @@ const tablesSchema = __schema({
       { name: 'investigation_image_investigation_id_key', constraint: 'unique', columns: ['investigationId'] },
     ],
   }, InvestigationImageRow),
+  investigationProgress: __table({
+    name: 'investigation_progress',
+    indexes: [
+      { accessor: 'investigationId', name: 'investigation_progress_investigation_id_idx_btree', algorithm: 'btree', columns: [
+        'investigationId',
+      ] },
+      { accessor: 'rackId', name: 'investigation_progress_rack_id_idx_btree', algorithm: 'btree', columns: [
+        'rackId',
+      ] },
+    ],
+    constraints: [
+      { name: 'investigation_progress_investigation_id_key', constraint: 'unique', columns: ['investigationId'] },
+    ],
+  }, InvestigationProgressRow),
   rack: __table({
     name: 'rack',
     indexes: [
@@ -274,6 +290,7 @@ const reducersSchema = __reducers(
   __reducerSchema("finish_benchmark_run", FinishBenchmarkRunReducer),
   __reducerSchema("ingest_simulated_observation", IngestSimulatedObservationReducer),
   __reducerSchema("initialize_demo", InitializeDemoReducer),
+  __reducerSchema("record_investigation_progress", RecordInvestigationProgressReducer),
   __reducerSchema("register_benchmark_runner", RegisterBenchmarkRunnerReducer),
   __reducerSchema("report_benchmark_sample", ReportBenchmarkSampleReducer),
   __reducerSchema("report_benchmark_stage", ReportBenchmarkStageReducer),

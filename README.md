@@ -104,7 +104,7 @@ Top navigation switches between **Rack Monitor** and the separate **Fleet Simula
 | Live Telemetry | Three compact environmental rows: temperature, humidity and raw sound, with provenance and freshness. |
 | Live / Simulation | Read-only subscribed values or explicitly committed simulator edits; no automatic observations. |
 | Rover Safety | Collision-only distance and controller-integration qualification; no invented stop state. |
-| Latest Investigation | This rack's latest persisted execution status, severity, review state, finding and recommended inspection. |
+| Latest Investigation | This rack's latest persisted execution status, severity, review state, finding and recommended inspection. While a run is in progress, every connected session shows live progress: which agent is working, which finished or failed, their tool calls and elapsed time. The agent writes this progress to SpacetimeDB (`investigation_progress`) and it is removed when the run ends. The main finding is a one-sentence plain-language headline written by the model. The UI also shows metric codes as everyday names and ISO timestamps as local times, and drops source IDs. Exact values, timestamps and sources stay in the details. |
 | View Investigation Details | Supervisor, invoked/not-invoked agents, evidence, visual provenance, hypotheses, verification, documentation and timeline. |
 | Previous investigations | Historical reports retain their original profile and evidence; selecting one does not replace the latest-summary card. |
 | Observation history & alerts | Collapsed recent history (50 per rack) and deterministic environmental alerts. |

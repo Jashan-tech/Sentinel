@@ -1,3 +1,4 @@
+import { createProgressPublisher } from "./progress.js";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import { ImageInput, InvestigationRequest, MAX_IMAGES } from "./schemas.js";
@@ -153,6 +154,14 @@ export function createApp(deps: AppDeps = {}) {
     };
     if (!persisted) res.on("close", onClose);
 
+    // Live progress for recorded runs: every dashboard subscribed to this rack sees which agent is working.
+    const progress =
+      persisted && investigationId && store?.progress
+        ? createProgressPublisher(
+            (p) => store.progress!(investigationId!, p.phase, JSON.stringify(p.steps)),
+            (m) => console.warn(`[sentinel-agent] ${m}`),
+          )
+        : null;
     const staleAfterMinutes = request.stale_after_minutes ?? config.staleAfterMinutes;
     const ds = createSnapshotDataSource(request, { staleAfterMinutes });
     // Default: multi-agent. `?mode=single` runs the original single-agent engine.
@@ -182,6 +191,7 @@ export function createApp(deps: AppDeps = {}) {
             visionModel: visionModel ?? specialistModel ?? model,
             visionModelName: config.visionModel,
             signal: cancel.signal,
+            onEvent: progress?.onEvent,
           });
     res.off("close", onClose);
 

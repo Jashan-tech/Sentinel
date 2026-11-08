@@ -2027,3 +2027,70 @@ footer > span {
   .bench-mode { display: flex; }
   .bench-mode button { flex: 1; }
 }
+
+/* ---- Live investigation progress ---- */
+.live-progress {
+  width: 100%;
+  max-width: 560px;
+  margin: 16px 0 0;
+  text-align: left;
+}
+.live-phase {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #d1e0eb;
+  margin: 0 0 12px;
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cyan);
+  flex: none;
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
+.live-elapsed {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.live-steps li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.step-mark { text-align: center; }
+.step-done .step-mark { color: var(--green); }
+.step-running .step-mark { color: var(--cyan); }
+.step-failed .step-mark { color: var(--amber); }
+.step-name { color: #d1e0eb; }
+.step-meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.live-note {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 10px 0 0;
+}

@@ -23,6 +23,7 @@ import {
   type InspectionMode,
 } from "./investigation";
 import Icon from "./Icon";
+import { mainFinding, plainText } from "./plainText";
 import EquipmentEvidence from "./EquipmentEvidence";
 import { prepareImage } from "./imageUpload";
 import { date } from "./telemetry";
@@ -77,6 +78,9 @@ export default function InvestigationPanel(props: {
   );
   const [completionRows] = useTable(
     tables.investigationCompletion.where((r) => r.rackId.eq(rack.rackId)),
+  );
+  const [progressRows] = useTable(
+    tables.investigationProgress.where((r) => r.rackId.eq(rack.rackId)),
   );
   // Image to inspect (local only until a run; bytes are sent to the agent, never stored).
   const [image, setImage] = useState<ImageAttachment | null>(null);
@@ -687,7 +691,10 @@ export default function InvestigationPanel(props: {
                       : "A connected session started this investigation. Results will appear when persisted."}
                 </p>
                 {!abandoned && (
-                  <progress aria-label="Investigation in progress" />
+                  <LiveProgress
+                    startedAtMs={Number(shown.createdAt.microsSinceUnixEpoch / 1000n)}
+                    progress={progressRows.find((p) => p.investigationId === shown.investigationId)}
+                  />
                 )}
               </div>
             ) : shown.status === "FAILED" ? (
@@ -723,11 +730,11 @@ export default function InvestigationPanel(props: {
                 <div className="main-finding">
                   <span className="eyebrow">Main finding</span>
                   <p className="inv-summary">
-                    {report?.summary ||
+                    {mainFinding(report) ||
                       "The saved record has no readable summary."}
                   </p>
                   <p className="summary-hint">
-                    Full summary and evidence in investigation details.
+                    Measured values, timestamps and sources are in the investigation details.
                   </p>
                 </div>
                 <div className="recommended-action">
@@ -737,8 +744,9 @@ export default function InvestigationPanel(props: {
                   <div>
                     <h3>Recommended action</h3>
                     <p>
-                      {report?.recommended_next_inspection?.[0] ??
-                        "No recommended action was recorded."}
+                      {report?.recommended_next_inspection?.[0]
+                        ? plainText(report.recommended_next_inspection[0])
+                        : "No recommended action was recorded."}
                     </p>
                   </div>
                 </div>
@@ -1140,6 +1148,75 @@ function ImageProvenanceView({ img }: { img: InvestigationImage }) {
           sent to the configured inference service.
         </small>
       </div>
+    </div>
+  );
+}
+
+const STEP_LABEL: Record<string, string> = {
+  supervisor: "Supervisor",
+  telemetry: "Telemetry agent",
+  environment: "Environment agent",
+  documentation: "Documentation agent",
+  vision: "Vision agent",
+  verification: "Verification agent",
+};
+interface ProgressStep {
+  agent: string;
+  state: "running" | "done" | "failed";
+  started_at: string;
+  ended_at?: string;
+  tool_calls: number;
+}
+
+/** Live view of a RUNNING investigation, from the progress row the agent writes to SpacetimeDB. */
+function LiveProgress({
+  startedAtMs,
+  progress,
+}: {
+  startedAtMs: number;
+  progress?: { phase: string; stepsJson: string };
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  let steps: ProgressStep[] = [];
+  try {
+    steps = progress ? (JSON.parse(progress.stepsJson) as ProgressStep[]) : [];
+  } catch {
+    steps = [];
+  }
+  const secs = (from: string, to?: string) =>
+    Math.max(0, Math.round(((to ? Date.parse(to) : now) - Date.parse(from)) / 1000));
+  const elapsed = Math.max(0, Math.round((now - startedAtMs) / 1000));
+  return (
+    <div className="live-progress" data-testid="live-progress" aria-live="polite">
+      <p className="live-phase">
+        <span className="live-dot" aria-hidden="true" />
+        {progress?.phase ?? "Waiting for the agent service to start"}
+        <span className="live-elapsed">{elapsed} s elapsed</span>
+      </p>
+      {steps.length > 0 && (
+        <ol className="live-steps">
+          {steps.map((st, i) => (
+            <li key={`${st.agent}-${i}`} className={`step-${st.state}`} data-state={st.state}>
+              <span className="step-mark" aria-hidden="true">
+                {st.state === "done" ? "✓" : st.state === "failed" ? "!" : "●"}
+              </span>
+              <span className="step-name">{STEP_LABEL[st.agent] ?? st.agent}</span>
+              <span className="step-meta">
+                {st.state === "running" ? "working · " : st.state === "failed" ? "did not complete · " : ""}
+                {secs(st.started_at, st.ended_at)} s
+                {st.tool_calls > 0 && ` · ${st.tool_calls} tool call${st.tool_calls === 1 ? "" : "s"}`}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="live-note">
+        Typically 30–60 s; each agent calls a hosted NVIDIA model in turn.
+      </p>
     </div>
   );
 }

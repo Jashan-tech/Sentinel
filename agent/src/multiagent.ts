@@ -63,6 +63,8 @@ export interface MultiAgentOptions {
   visionModelName?: string;
   /** Cancels the investigation (e.g. the HTTP client disconnected). */
   signal?: AbortSignal;
+  /** Called with every timeline event as it happens (live progress). Must not throw or block. */
+  onEvent?: (e: InvestigationEvent) => void;
 }
 
 export interface MultiAgentResult {
@@ -209,8 +211,11 @@ Reply with ONLY this JSON object:
 
 const FINAL_PROMPT = `Write the final diagnostic report from the team's findings above.
 Reply with ONLY this JSON object:
-{"severity": "NORMAL"|"WARNING"|"CRITICAL"|"UNKNOWN", "summary": string, "hypotheses": [{"description": string, "supporting_evidence": string[], "contradicting_evidence": string[], "missing_evidence": string[]}], "recommended_next_inspection": string[], "verified_findings": string[], "missing_information": string[]}
+{"severity": "NORMAL"|"WARNING"|"CRITICAL"|"UNKNOWN", "headline": string, "summary": string, "hypotheses": [{"description": string, "supporting_evidence": string[], "contradicting_evidence": string[], "missing_evidence": string[]}], "recommended_next_inspection": string[], "verified_findings": string[], "missing_information": string[]}
 Rules:
+- headline: ONE plain-language sentence (at most 25 words) a technician reads first: the condition, why it matters, and
+  the key caveat (for example simulated or stale data). Use everyday names ("ambient temperature", "humidity"), keep measured values exactly as reported (41.5 °C, not 42 °C),
+  and no metric codes, ISO timestamps or source identifiers. It must not say anything the summary does not support.
 - summary: measured facts (values, units, timestamps) and configured thresholds, clearly labelled; note simulated provenance.
 - hypotheses: competing explanations drawn from the specialists, with evidence for and against. Not confirmed faults.
 - verified_findings: only claims the Verification Agent confirmed (empty if verification did not run).
@@ -461,14 +466,21 @@ export async function runMultiAgentInvestigation(
     description: string,
     status: InvestigationEvent["status"] = "INFO",
     extra: { agent?: string; tool?: string } = {},
-  ) =>
-    events.push({
+  ) => {
+    const ev: InvestigationEvent = {
       type,
       timestamp: new Date().toISOString(),
       description,
       status,
       ...extra,
-    });
+    };
+    events.push(ev);
+    try {
+      opts.onEvent?.(ev);
+    } catch {
+      // progress reporting must never affect the investigation
+    }
+  };
 
   const toolsets = createAgentToolsets(opts.dataSource);
   const policySeverity = thresholdSeverity(request, opts.staleAfterMinutes);
@@ -1361,6 +1373,10 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
         ...base,
         ...a,
         severity: "UNKNOWN",
+        headline:
+          status === "FAILED"
+            ? "The investigation failed before a diagnosis was produced."
+            : "No final report was produced; review the specialist findings in the details.",
         summary,
         hypotheses: [],
         recommended_next_inspection: [
@@ -1527,6 +1543,7 @@ Findings to review:\n${findingsDigest(state.findings, null)}`;
   const final: MultiAgentReport = report ?? {
     rack_id: request.rack_id,
     severity: "UNKNOWN",
+    headline: "The investigation failed before a diagnosis was produced.",
     summary: "Investigation failed before a report could be produced.",
     hypotheses: [],
     recommended_next_inspection: ["Retry the investigation."],

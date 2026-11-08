@@ -150,3 +150,27 @@ export function validateInvestigationImage(args: {
   if (args.thumbnailDataUrl && (args.thumbnailDataUrl.length > MAX_THUMBNAIL_CHARS || !THUMB_RE.test(args.thumbnailDataUrl)))
     throw new Error(`Thumbnail must be a JPEG data URL of at most ${MAX_THUMBNAIL_CHARS} characters`);
 }
+
+const PROGRESS_AGENTS = ["supervisor", "telemetry", "environment", "documentation", "vision", "verification"];
+const PROGRESS_STATES = ["running", "done", "failed"];
+/** Live progress is small, structured and descriptive (no findings, no image data). */
+export function validateProgress(phase: string, stepsJson: string): void {
+  if (!phase.trim() || phase.length > 200) throw new Error("Progress phase must be 1-200 characters");
+  if (stepsJson.length > 4000) throw new Error("Progress steps exceed 4000 characters");
+  let steps: unknown;
+  try {
+    steps = JSON.parse(stepsJson);
+  } catch {
+    throw new Error("Progress steps must be JSON");
+  }
+  if (!Array.isArray(steps) || steps.length > 30) throw new Error("Progress steps must be an array of at most 30 steps");
+  for (const s of steps as Record<string, unknown>[]) {
+    if (!s || typeof s !== "object") throw new Error("Each progress step must be an object");
+    if (!PROGRESS_AGENTS.includes(String(s.agent))) throw new Error(`Unknown progress agent ${String(s.agent).slice(0, 30)}`);
+    if (!PROGRESS_STATES.includes(String(s.state))) throw new Error("Progress step state must be running, done or failed");
+    if (typeof s.started_at !== "string" || Number.isNaN(Date.parse(s.started_at))) throw new Error("Progress step needs started_at");
+    if (s.ended_at !== undefined && (typeof s.ended_at !== "string" || Number.isNaN(Date.parse(s.ended_at))))
+      throw new Error("Progress step ended_at must be a timestamp");
+    if (!Number.isInteger(s.tool_calls) || (s.tool_calls as number) < 0) throw new Error("Progress step tool_calls must be a count");
+  }
+}

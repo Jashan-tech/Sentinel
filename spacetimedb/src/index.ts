@@ -24,6 +24,7 @@ import {
   validateInvestigationStart,
   validateInvestigationCompletion,
   validateInvestigationImage,
+  validateProgress,
   abandonedReport,
   expiredReport,
   isStaleRunning,
@@ -153,6 +154,18 @@ const spacetimedb = schema({
       kind: t.string(),
       recordedBy: t.identity(),
       recordedAt: t.timestamp(),
+    },
+  ),
+  // Live progress of a RUNNING investigation, written only by the authorized agent and deleted
+  // when the run reaches a terminal state. Descriptive only: which agent is working, never a finding.
+  investigationProgress: table(
+    { public: true },
+    {
+      investigationId: t.string().primaryKey(),
+      rackId: t.string().index("btree"),
+      phase: t.string(),
+      stepsJson: t.string(),
+      updatedAt: t.timestamp(),
     },
   ),
   // Image provenance for an investigation (Feature 4). Never the full image: hash, metadata
@@ -448,6 +461,7 @@ function ensureExpirySchedule(ctx: Ctx) {
     });
 }
 function recordTerminal(ctx: Ctx, row: { investigationId: string; rackId: string }, kind: string) {
+  ctx.db.investigationProgress.investigationId.delete(row.investigationId); // progress ends with the run
   if (!ctx.db.investigationCompletion.investigationId.find(row.investigationId))
     ctx.db.investigationCompletion.insert({
       investigationId: row.investigationId,
@@ -477,6 +491,7 @@ function deleteInvestigation(ctx: Ctx, id: string) {
   ctx.db.investigation.investigationId.delete(id);
   ctx.db.investigationImage.investigationId.delete(id);
   ctx.db.investigationCompletion.investigationId.delete(id);
+  ctx.db.investigationProgress.investigationId.delete(id);
 }
 
 export const claimAdmin = spacetimedb.reducer((ctx) => {
@@ -593,6 +608,26 @@ export const completeInvestigation = spacetimedb.reducer(
       completedAt: ctx.timestamp,
     });
     recordTerminal(ctx, row, "AGENT");
+  },
+);
+
+/** Live progress from the authorized agent while a run is RUNNING. Ignored once the run is terminal. */
+export const recordInvestigationProgress = spacetimedb.reducer(
+  { investigationId: t.string(), phase: t.string(), stepsJson: t.string() },
+  (ctx, { investigationId, phase, stepsJson }) => {
+    if (!isAuthorizedAgent(ctx, ctx.sender))
+      throw new SenderError("Only an authorized agent service can record investigation progress");
+    const row = ctx.db.investigation.investigationId.find(investigationId);
+    if (!row) throw new SenderError("Unknown investigation");
+    if (row.status !== "RUNNING") return; // a late update must not resurrect progress for a finished run
+    try {
+      validateProgress(phase, stepsJson);
+    } catch (e) {
+      throw new SenderError((e as Error).message);
+    }
+    const next = { investigationId, rackId: row.rackId, phase, stepsJson, updatedAt: ctx.timestamp };
+    if (ctx.db.investigationProgress.investigationId.find(investigationId)) ctx.db.investigationProgress.investigationId.update(next);
+    else ctx.db.investigationProgress.insert(next);
   },
 );
 

@@ -425,6 +425,8 @@ export type VerificationResult = z.infer<typeof VerificationResult>;
 
 /** What the Supervisor writes in the final synthesis. */
 export const FinalSynthesis = ModelReport.extend({
+  /** One plain-language sentence for the dashboard's main finding ("" when the model omits it). */
+  headline: cappedOptText(240),
   verified_findings: capped(z.string(), 20),
   missing_information: capped(z.string(), 30),
 });
@@ -454,6 +456,8 @@ export const VerificationOutcome = z.enum(VERIFICATION_OUTCOMES);
 export type VerificationOutcome = z.infer<typeof VerificationOutcome>;
 
 export const MultiAgentReport = DiagnosticReport.extend({
+  /** Plain-language one-sentence main finding (AI-written; the summary holds the measured detail). */
+  headline: z.string().default(""),
   tool_calls: z.array(AgentToolCallRecord),
   supervisor_plan: z.string(),
   agents_invoked: z.array(

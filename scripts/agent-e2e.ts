@@ -114,6 +114,10 @@ try {
     b.locator(`[data-testid="investigation-record"][data-id="${id1}"]`),
   ).toHaveAttribute("data-status", "RUNNING");
   log("4", `Investigation ${id1} started; session B sees RUNNING`);
+  // Live progress written by the agent to SpacetimeDB reaches BOTH sessions while it runs.
+  const liveB = b.locator(`[data-testid="investigation-record"][data-id="${id1}"] [data-testid="live-progress"] li`);
+  await expect(liveB.first()).toBeVisible({ timeout: 30_000 });
+  log("4", `Live progress in session B: "${(await b.locator('[data-testid="live-progress"] .live-phase').first().textContent())?.trim()}" · ${await liveB.count()} step(s)`);
   const t0 = Date.now();
   const recA = await waitDone(a, id1);
   const status1 = await recA.getAttribute("data-status");
@@ -158,6 +162,11 @@ try {
   expect(rep1.specialist_findings.length).toBeGreaterThan(0);
   expect(rep1.verification).not.toBeNull();
   await recA.getByText("View Investigation Details", { exact: true }).click();
+  // The main finding is plain language: no metric codes, ISO timestamps or source identifiers.
+  const finding = (await recA.locator(".inv-summary").first().textContent()) ?? "";
+  expect(finding).not.toMatch(/AMBIENT_TEMPERATURE_C|RELATIVE_HUMIDITY_PERCENT|\d{4}-\d{2}-\d{2}T\d{2}:|e2e-temp-01/);
+  log("6", `Main finding (${rep1.headline ? "AI headline" : "summary start"}): ${finding.slice(0, 200)}`);
+  expect(await recA.locator('[data-testid="live-progress"]').count()).toBe(0);
   await expect(recA).toContainText("Measured facts");
   await expect(recA).toContainText("AI hypotheses");
   await expect(recA.getByTestId("verification-status")).toBeVisible();
@@ -222,20 +231,19 @@ try {
   ).toBe(1);
   log("11-12", "Earlier investigation preserved as history");
 
-  // 13. Missing telemetry stays missing: no sound/distance readings were submitted.
+  // 13. Missing telemetry stays missing, and nothing is fabricated: every sound/distance measurement in the
+  // evidence must be a reading that actually exists in SpacetimeDB for this rack (someone may have entered one).
+  const stored = await sql("SELECT metric_type, numeric_value, source_identifier FROM current_telemetry WHERE rack_id = 'rack-1'");
   for (const rep of [rep1, rep2]) {
-    const metrics = rep.evidence.measurements.map((m: any) => m.metric_type);
-    expect(metrics).not.toContain("SOUND_RAW");
-    expect(metrics).not.toContain("ULTRASONIC_DISTANCE_CM");
+    for (const metric of ["SOUND_RAW", "ULTRASONIC_DISTANCE_CM"]) {
+      const inDb = stored.find((r) => r.metric_type === metric);
+      const inEvidence = rep.evidence.measurements.filter((m: any) => m.metric_type === metric);
+      if (!inDb) expect(inEvidence).toEqual([]);
+      else for (const m of inEvidence) expect([m.numeric_value, m.source_identifier]).toEqual([inDb.numeric_value, inDb.source_identifier]);
+    }
   }
-  const missingText = JSON.stringify([
-    rep1.missing_information,
-    rep1.specialist_findings.map((f: any) => f.missing_information),
-  ]);
-  log(
-    "13",
-    `No SOUND_RAW/ULTRASONIC evidence fabricated; missing info mentions sound: ${/SOUND/i.test(missingText)}, distance: ${/ULTRASONIC|distance/i.test(missingText)}`,
-  );
+  const missingText = JSON.stringify([rep1.missing_information, rep1.specialist_findings.map((f: any) => f.missing_information)]);
+  log("13", `Sound/distance evidence matches SpacetimeDB exactly (stored: ${stored.map((r) => r.metric_type).join(", ")}); missing info mentions sound: ${/SOUND/i.test(missingText)}, distance: ${/ULTRASONIC|distance/i.test(missingText)}`);
 
   // 14. Failure paths are never shown as successful.
   await a.route("**/api/agent/investigate", (r) =>

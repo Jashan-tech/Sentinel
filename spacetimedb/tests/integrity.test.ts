@@ -110,3 +110,24 @@ test("9: below the limit nothing is evicted; ties evict the oldest row", () => {
   assert.deepEqual(fairEvictions(rows, 2), []);
   assert.deepEqual(fairEvictions(rows, 1), [2n]);
 });
+
+// ---- live investigation progress ----
+import { validateProgress } from "../src/investigation";
+test("progress: small, structured, descriptive steps only", () => {
+  const ok = JSON.stringify([{ agent: "telemetry", state: "done", started_at: "2026-11-08T07:00:00Z", ended_at: "2026-11-08T07:00:06Z", tool_calls: 4 }]);
+  validateProgress("Verification agent is cross-checking", ok);
+  validateProgress("Supervisor is planning", "[]");
+  for (const [phase, steps] of [
+    ["", ok],
+    ["x".repeat(201), ok],
+    ["p", "not json"],
+    ["p", "{}"],
+    ["p", JSON.stringify([{ agent: "hacker", state: "done", started_at: "2026-11-08T07:00:00Z", tool_calls: 0 }])],
+    ["p", JSON.stringify([{ agent: "telemetry", state: "maybe", started_at: "2026-11-08T07:00:00Z", tool_calls: 0 }])],
+    ["p", JSON.stringify([{ agent: "telemetry", state: "done", started_at: "soon", tool_calls: 0 }])],
+    ["p", JSON.stringify([{ agent: "telemetry", state: "done", started_at: "2026-11-08T07:00:00Z", tool_calls: -1 }])],
+    ["p", "[" + Array(31).fill('{"agent":"telemetry","state":"done","started_at":"2026-11-08T07:00:00Z","tool_calls":0}').join(",") + "]"],
+    ["p", JSON.stringify([{ agent: "telemetry", state: "done", started_at: "2026-11-08T07:00:00Z", tool_calls: 0, note: "y".repeat(5000) }])],
+  ] as const)
+    assert.throws(() => validateProgress(phase, steps), Error, `${phase.slice(0, 20)} ${steps.slice(0, 60)}`);
+});

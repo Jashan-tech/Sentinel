@@ -116,6 +116,17 @@ async function investigationTrustChecks(agent: DbConnection, browser: DbConnecti
   try {
     const inv1 = id();
     await start(browser, inv1);
+    // Live progress (written only by the agent; removed when the run ends).
+    const steps = JSON.stringify([{ agent: "telemetry", state: "running", started_at: new Date().toISOString(), tool_calls: 2 }]);
+    await rejects(browser.reducers.recordInvestigationProgress({ investigationId: inv1, phase: "fake", stepsJson: "[]" }), /authorized agent/);
+    await rejects(agent.reducers.recordInvestigationProgress({ investigationId: inv1, phase: "p", stepsJson: '[{"agent":"x"}]' }), /Unknown progress agent/);
+    await agent.reducers.recordInvestigationProgress({ investigationId: inv1, phase: "Telemetry agent is checking", stepsJson: steps });
+    const live = await sql(`SELECT * FROM investigation_progress WHERE investigation_id = '${inv1}'`);
+    check("only the authorized agent can publish validated live progress", () => {
+      assert.equal(live.length, 1);
+      assert.equal(live[0].phase, "Telemetry agent is checking");
+      assert.equal(live[0].rack_id, "rack-2");
+    });
     await rejects(browser.reducers.completeInvestigation(completion(inv1, agentReport("rack-2"))), /authorized agent/);
     check("forged completion from a browser identity is rejected", () => {});
     await rejects(agent.reducers.completeInvestigation(completion(inv1, agentReport("rack-1"))), /does not match investigated rack/);
@@ -133,6 +144,9 @@ async function investigationTrustChecks(agent: DbConnection, browser: DbConnecti
       assert.equal(r1.status, "COMPLETED");
       assert.equal(k1, "AGENT");
     });
+    await agent.reducers.recordInvestigationProgress({ investigationId: inv1, phase: "late", stepsJson: steps }); // ignored
+    const leftover = await sql(`SELECT * FROM investigation_progress WHERE investigation_id = '${inv1}'`);
+    check("completion removes the progress row; a late progress update does not bring it back", () => assert.equal(leftover.length, 0));
     await agent.reducers.completeInvestigation(good); // identical retry
     await rejects(agent.reducers.completeInvestigation({ ...good, reportJson: JSON.stringify(agentReport("rack-2", { summary: "changed" })) }), /already COMPLETED/);
     await browser.reducers.abandonInvestigation({ investigationId: inv1, reason: "late" }); // no-op

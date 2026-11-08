@@ -16,6 +16,8 @@ export interface StoredImage {
 export interface InvestigationStore {
   load(id: string): Promise<{ row: StoredInvestigation | null; image: StoredImage | null }>;
   complete(id: string, status: string, severity: string, reportJson: string, eventsJson: string): Promise<void>;
+  /** Best-effort live progress while the run is in flight (single attempt; callers ignore failures). */
+  progress?(id: string, phase: string, stepsJson: string): Promise<void>;
 }
 
 export class PersistenceError extends Error {}
@@ -80,6 +82,15 @@ export function createSpacetimeStore(cfg: PersistenceConfig, fetchImpl: typeof f
         }
       }
       throw new PersistenceError(`Could not record the investigation in SpacetimeDB (${last})`);
+    },
+    async progress(id, phase, stepsJson) {
+      const res = await fetchImpl(`${base}/call/record_investigation_progress`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify([id, phase, stepsJson]),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!res.ok) throw new PersistenceError(`progress HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     },
   };
 }

@@ -10,7 +10,7 @@
     "dev": "npm run dev -w dashboard",
     "build": "npm run build -w dashboard",
     "typecheck": "tsc -p spacetimedb && tsc -p dashboard && tsc -p scripts && tsc -p benchmark",
-    "test": "tsx --test spacetimedb/tests/*.test.ts benchmark/tests/*.test.ts",
+    "test": "tsx --test spacetimedb/tests/*.test.ts benchmark/tests/*.test.ts dashboard/tests/*.test.ts",
     "test:integration": "tsx scripts/integration.ts",
     "test:browser": "tsx scripts/browser.ts",
     "db:start": "node scripts/spacetime.mjs start --listen-addr 127.0.0.1:3000 --data-dir .spacetime --non-interactive",
