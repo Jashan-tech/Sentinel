@@ -236,7 +236,7 @@ try {
     a.getByRole("button", { name: "Live", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(a.locator(".simulation-editor")).toHaveCount(0);
-  await a.getByLabel("Rack selector").selectOption("rack-3");
+  await a.getByTestId("rack-option-rack-3").click();
   await expect(a.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
     "Unavailable",
   );
@@ -247,7 +247,7 @@ try {
     path: output + "mission-control-empty.png",
     fullPage: true,
   });
-  await a.getByLabel("Rack selector").selectOption("rack-1");
+  await a.getByTestId("rack-option-rack-1").click();
   await a.getByRole("button", { name: "Simulation", exact: true }).click();
   await a
     .getByLabel("Ambient temperature slider", { exact: true })
@@ -310,7 +310,7 @@ try {
   );
   await expect(b.getByTestId("rack-status")).toHaveClass(/critical/);
   await a.getByLabel("Issues only").check();
-  await expect(a.getByLabel("Rack selector")).toHaveValue("rack-1");
+  await expect(a.getByTestId("rack-option-rack-1")).toHaveAttribute("aria-current", "true");
   await a.getByLabel("Issues only").uncheck();
   assert.equal(
     serviceCalls,
@@ -507,9 +507,9 @@ try {
     "data-id",
     id,
   );
-  await a.getByLabel("Rack selector").selectOption("rack-3");
+  await a.getByTestId("rack-option-rack-3").click();
   await expect(a.getByTestId("investigation-record")).toHaveCount(0);
-  await a.getByLabel("Rack selector").selectOption("rack-1");
+  await a.getByTestId("rack-option-rack-1").click();
   await b.reload();
   await expect(b.getByTestId("investigation-record")).toHaveAttribute(
     "data-id",

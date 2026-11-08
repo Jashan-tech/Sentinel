@@ -33,10 +33,8 @@ try {
   );
   // The production demo starts empty; rack 3 stays untouched by integration tests.
   for (const p of pages) {
-    await expect(p.getByLabel("Rack selector").locator("option")).toHaveCount(
-      3,
-    );
-    await p.getByLabel("Rack selector").selectOption("rack-3");
+    await expect(p.getByRole("group", { name: "Rack selector" }).getByRole("button")).toHaveCount(3);
+    await p.getByTestId("rack-option-rack-3").click();
     await expect(p.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
       "Unavailable",
     );
@@ -100,11 +98,11 @@ try {
   await b.reload();
   await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("20");
   for (let i = 0; i < 4; i++) {
-    await b.getByLabel("Rack selector").selectOption("rack-2");
+    await b.getByTestId("rack-option-rack-2").click();
     await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText(
       "Unavailable",
     );
-    await b.getByLabel("Rack selector").selectOption("rack-1");
+    await b.getByTestId("rack-option-rack-1").click();
     await expect(b.getByTestId("AMBIENT_TEMPERATURE_C")).toContainText("20");
   }
   await a.screenshot({

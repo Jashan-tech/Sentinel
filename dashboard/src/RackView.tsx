@@ -12,11 +12,9 @@ import Icon, { type IconName } from "./Icon";
 export default function RackView({
   rack,
   online,
-  rackSelection,
 }: {
   rack: Rack;
   online: boolean;
-  rackSelection: ReactNode;
 }) {
   const state = useSpacetimeDB();
   const [current, currentReady] = useTable(
@@ -197,13 +195,9 @@ export default function RackView({
       </form>
     );
   }
-  const telemetry = (
-    <>
-      <section
-        className="panel telemetry-card"
-        aria-labelledby="telemetry-title"
-      >
-        <div className="panel-heading">
+  const readings = (
+    <section className="readings telemetry-card" aria-labelledby="telemetry-title">
+        <div className="readings-head">
           <h2 id="telemetry-title">Live Telemetry</h2>
           <span className="source-tag">
             {current.length
@@ -215,7 +209,7 @@ export default function RackView({
               : "Awaiting data"}
           </span>
         </div>
-        <div className="telemetry-rows">
+        <div className="telemetry-rows readings-grid">
           {environmental.map((m, i) => {
             const reading = current.find((r) => r.metricType === m.id);
             const violation =
@@ -275,6 +269,10 @@ export default function RackView({
             );
           })}
         </div>
+    </section>
+  );
+  const controls = (
+    <section className="panel telemetry-controls" aria-label="Telemetry controls">
         <div className="telemetry-bottom">
           <span>
             <span className={`status-dot ${online ? "" : "inactive"}`} />
@@ -349,7 +347,10 @@ export default function RackView({
             </details>
           </div>
         )}
-      </section>
+    </section>
+  );
+  const safetyCard = (
+    <>
       <section
         className="safety-strip"
         aria-label="Rover Safety"
@@ -387,6 +388,10 @@ export default function RackView({
           </details>
         )}
       </section>
+    </>
+  );
+  const feedback = (
+    <>
       {message && (
         <div role="status" className={failed ? "error feedback" : "feedback"}>
           {message}
@@ -396,11 +401,12 @@ export default function RackView({
   );
   return (
     <>
-      <section
-        className="selection-bar"
-        aria-label="Selected rack configuration"
-      >
-        {rackSelection}
+      <header className="rack-header" aria-label="Selected rack configuration">
+        <div className="rack-title">
+          <span className="eyebrow">Rack · {rack.locationLabel}</span>
+          <h1>{rack.displayName}</h1>
+        </div>
+        <div className="rack-header-controls">
         <label className="server-select">
           <span>
             Server profile <small>manufacturer-documented range</small>
@@ -429,6 +435,33 @@ export default function RackView({
             ))}
           </select>
         </label>
+        <div className={`rack-status ${level}`} data-testid="rack-status">
+          <span className="status-dot" />
+          <div>
+            <small>Current rack status</small>
+            <strong>{rackStatus}</strong>
+          </div>
+        </div>
+        </div>
+      </header>
+      {readings}
+      <div className="console-grid">
+        <div className="console-main">
+          <InvestigationPanel
+            rack={rack}
+            profile={profile}
+            assignedEquipment={assigned}
+            profileSource={profileSource}
+            current={current}
+            history={history}
+            alerts={alerts}
+            ready={ready}
+            freshnessSeconds={freshness}
+          />
+        </div>
+        <aside className="console-side" aria-label="Rack context">
+          <section className="panel thresholds-card">
+            <h2>Thresholds</h2>
         <div className="profile-limits" data-testid="profile-limits">
           <span>{profileSource ? "Documented thresholds" : "Demo thresholds"}</span>
           <p>
@@ -455,26 +488,12 @@ export default function RackView({
             )}
           </small>
         </div>
-        <div className={`rack-status ${level}`} data-testid="rack-status">
-          <span className="status-dot" />
-          <div>
-            <small>Current rack status</small>
-            <strong>{rackStatus}</strong>
-          </div>
-        </div>
-      </section>
-      <InvestigationPanel
-        rack={rack}
-        profile={profile}
-        assignedEquipment={assigned}
-        profileSource={profileSource}
-        current={current}
-        history={history}
-        alerts={alerts}
-        ready={ready}
-        freshnessSeconds={freshness}
-        telemetry={telemetry}
-      />
+          </section>
+          {safetyCard}
+          {controls}
+          {feedback}
+        </aside>
+      </div>
       <details className="panel observation-details">
         <summary>
           <span>Observation history &amp; alerts</span>

@@ -4,6 +4,7 @@ import { tables } from "./module_bindings";
 import RackView from "./RackView";
 import FleetSimulation from "./FleetSimulation";
 import Icon from "./Icon";
+import { catalogEntry } from "../../spacetimedb/src/equipmentCatalog";
 
 export default function App() {
   const state = useSpacetimeDB();
@@ -51,83 +52,93 @@ export default function App() {
       : wasConnected
         ? "Disconnected"
         : "Connecting";
+  const [equipment] = useTable(tables.rackEquipment);
+  const serverName = (rackId: string) => {
+    const e = catalogEntry(equipment.find((x) => x.rackId === rackId)?.modelId ?? "");
+    return e ? `${e.manufacturer} ${e.model}` : "No server selected";
+  };
   const rackSelection = (
-    <div className="rack-picker">
-      <label className="rack-select-label">
-        <Icon name="rack" size={20} />
-        <span>
-          Rack
-          <select
-            aria-label="Rack selector"
-            value={rack?.rackId ?? ""}
-            disabled={!racksReady || !visible.length}
-            onChange={(e) => setSelected(e.target.value)}
+    <div className="rack-nav">
+      <div className="rack-nav-head">
+        <span className="sidebar-label">Racks</span>
+        <label className="issues-filter">
+          <input
+            type="checkbox"
+            checked={issuesOnly}
+            onChange={(e) => setIssuesOnly(e.target.checked)}
+          />
+          Issues only
+        </label>
+      </div>
+      <div className="rack-list" role="group" aria-label="Rack selector">
+        {!visible.length && (
+          <p className="rack-empty">
+            {racksReady ? (issuesOnly ? "No racks with issues" : "No racks configured") : "Connecting…"}
+          </p>
+        )}
+        {visible.map((r) => (
+          <button
+            key={r.rackId}
+            type="button"
+            className="rack-option"
+            data-testid={`rack-option-${r.rackId}`}
+            aria-current={r.rackId === rack?.rackId ? "true" : undefined}
+            onClick={() => setSelected(r.rackId)}
           >
-            {!visible.length && (
-              <option value="">
-                {racksReady
-                  ? issuesOnly
-                    ? "No racks with issues"
-                    : "No racks configured"
-                  : "Connecting…"}
-              </option>
-            )}
-            {visible.map((r) => (
-              <option key={r.rackId} value={r.rackId}>
-                {issues.has(r.rackId) ? "● " : ""}
-                {r.displayName}
-              </option>
-            ))}
-          </select>
-        </span>
-      </label>
-      <label className="issues-filter">
-        <input
-          type="checkbox"
-          checked={issuesOnly}
-          onChange={(e) => setIssuesOnly(e.target.checked)}
-        />
-        Issues only
-      </label>
-      <span className="rack-location">
-        {rack?.locationLabel ?? "Awaiting rack selection"}
-      </span>
+            <span className={`rack-dot ${issues.has(r.rackId) ? "issue" : "ok"}`} aria-hidden="true" />
+            <span className="rack-option-text">
+              <strong>{r.displayName}</strong>
+              <small>{serverName(r.rackId)}</small>
+            </span>
+            {issues.has(r.rackId) && <span className="visually-hidden"> (issue)</span>}
+          </button>
+        ))}
+      </div>
     </div>
   );
   return (
-    <div className="app-shell">
+    <div className="app-shell console">
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
-      <header className="topbar">
-        <a
-          className="brand"
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setPage("rack");
-          }}
-          aria-label="SENTINEL home"
-        >
-          <span className="brand-mark">
-            <svg viewBox="0 0 28 32" fill="none" aria-hidden="true">
-              <path
-                d="m14 2 11 6v15l-11 7L3 23V8l11-6Z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <path
-                d="m19 10-5-3-6 4 12 9-6 4-5-3"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span>
-            SENTINEL<small>Mission control</small>
-          </span>
-        </a>
+      <aside className="sidebar" aria-label="SENTINEL navigation">
+        <div className="sidebar-top">
+          <a
+            className="brand"
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setPage("rack");
+            }}
+            aria-label="SENTINEL home"
+          >
+            <span className="brand-mark">
+              <svg viewBox="0 0 28 32" fill="none" aria-hidden="true">
+                <path
+                    d="m14 2 11 6v15l-11 7L3 23V8l11-6Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                />
+                <path
+                    d="m19 10-5-3-6 4 12 9-6 4-5-3"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            <span>
+              SENTINEL<small>Mission control</small>
+            </span>
+          </a>
+          <div
+            className={`connection ${state.isActive ? "online" : "offline"}`}
+            role="status"
+          >
+            <i />
+            {status}
+          </div>
+        </div>
         <nav className="primary-nav" aria-label="Primary navigation">
           <button
             aria-current={page === "rack" ? "page" : undefined}
@@ -144,14 +155,12 @@ export default function App() {
             Fleet Simulation
           </button>
         </nav>
-        <div
-          className={`connection ${state.isActive ? "online" : "offline"}`}
-          role="status"
-        >
-          <i />
-          {status}
+        {page === "rack" && rackSelection}
+        <div className="sidebar-foot">
+          <span className={`status-dot ${state.isActive ? "" : "inactive"}`} />
+          {state.isActive ? "SpacetimeDB synchronized" : "Awaiting connection"}
         </div>
-      </header>
+      </aside>
       <main id="main-content">
         {state.connectionError && (
           <div className="error" role="alert">
@@ -162,32 +171,14 @@ export default function App() {
           <FleetSimulation />
         ) : (
           <>
-            <div className="page-heading">
-              <div>
-                <span className="eyebrow">Infrastructure operations</span>
-                <h1>Rack Monitor</h1>
-                <p>Your environment. Your evidence. One clear picture.</p>
-              </div>
-              <span className="workspace-note">
-                <span
-                  className={`status-dot ${state.isActive ? "" : "inactive"}`}
-                />
-                {state.isActive
-                  ? "SpacetimeDB synchronized"
-                  : "Awaiting connection"}
-              </span>
-            </div>
-
             {rack ? (
               <RackView
                 key={`${rack.rackId}:${reconnectKey}`}
                 rack={rack}
                 online={state.isActive}
-                rackSelection={rackSelection}
               />
             ) : (
               <>
-                {rackSelection}
                 <section className="panel empty-state">
                   <Icon name="rack" size={30} />
                   <h2>

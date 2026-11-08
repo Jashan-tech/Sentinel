@@ -40,8 +40,8 @@ async function open(p: Page) {
   await expect(
     p.getByRole("status").filter({ hasText: /^Connected$/ }),
   ).toBeVisible();
-  await p.getByLabel("Rack selector").selectOption("rack-1");
-  await expect(p.getByLabel("Rack selector")).toHaveValue("rack-1");
+  await p.getByTestId("rack-option-rack-1").click();
+  await expect(p.getByTestId("rack-option-rack-1")).toHaveAttribute("aria-current", "true");
   await p.getByRole("button", { name: "Simulation", exact: true }).click();
   await p.locator(".simulation-editor .advanced-settings > summary").click();
 }

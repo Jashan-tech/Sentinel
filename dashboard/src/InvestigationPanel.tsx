@@ -65,7 +65,8 @@ export default function InvestigationPanel(props: {
   profileSource?: RackProfileSource;
   ready: boolean;
   freshnessSeconds: number;
-  telemetry: ReactNode;
+  /** Optional content rendered above the actions (kept for older layouts). */
+  telemetry?: ReactNode;
 }) {
   const { rack, profile, ready } = props;
   const state = useSpacetimeDB();
