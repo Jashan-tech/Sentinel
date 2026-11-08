@@ -839,8 +839,8 @@ async function standoff(where: string) {
 
 /** Ask Nemotron if the cabled rack is in view. If the box is partly in view, nudge toward it
  *  (small turn + a little push forward); otherwise scan left/right. All moves are recorded for the way home. */
-async function findWiresNearby(where: string, scan = true, nudge = true): Promise<boolean> {
-  const step = Number(env("ROUTE_SCAN_DEG", "20"));
+async function findWiresNearby(where: string, scan = true, nudge = true, scanMax = 40): Promise<boolean> {
+  const step = Number(env("ROUTE_SCAN_DEG", "10")); // small steps so the wires aren't skipped
   const pushCm = Number(env("ROUTE_PUSH_CM", "8"));
   let l = await lookAndLog(where);
   for (let i = 0; nudge && i < 2 && l.view !== "OPEN_RACK_CABLES" && l.rack_visible && l.x !== null; i++) {
@@ -853,14 +853,19 @@ async function findWiresNearby(where: string, scan = true, nudge = true): Promis
   }
   if (l.view === "OPEN_RACK_CABLES") { await centreTarget(where, l); return true; }
   if (!scan) return false;
-  let at = 0; // scan offset in degrees: negative = left
-  for (const target of [-step, -2 * step, step, 2 * step]) {
-    checkAbort();
-    const dd = target - at; await turnDeg(dd < 0 ? "left" : "right", Math.abs(dd)); at = target;
-    l = await lookAndLog(`${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
-    if (l.view === "OPEN_RACK_CABLES") { await centreTarget(where, l); return true; }
+  // Turn a little at a time and stop to look each time: left first, then back and right.
+  let at = 0; // offset in degrees: negative = left
+  for (const dir of [-1, 1]) {
+    for (let k = 1; k * step <= scanMax; k++) {
+      checkAbort();
+      const target = dir * k * step;
+      const dd = target - at; await turnDeg(dd < 0 ? "left" : "right", Math.abs(dd)); at = target;
+      await sleep(400); // let the camera settle before looking
+      l = await lookAndLog(`${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
+      if (l.view === "OPEN_RACK_CABLES") { await centreTarget(where, l); return true; }
+    }
   }
-  await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
+  if (at !== 0) await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
   return false;
 }
 
@@ -935,7 +940,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   await turn("right", degMs(ROUTE.faceDeg)); await sleep(500);
   phase("inspecting the left side", rackId);
   await standoff("Left side");
-  if (await findWiresNearby("Left side", false)) return finish("Left side", true);
+  if (await findWiresNearby("Left side", true, true, 20)) return finish("Left side", true);
   log("Left side: no exposed wires on this side.");
   await sleep(ROUTE.pauseMs);
 
