@@ -17,7 +17,7 @@ interface Reading {
   age_s: number | null;
 }
 
-function useRover() {
+export function useRover() {
   const [data, setData] = useState<Reading | null>(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<{ t: number; temp: number | null; hum: number | null; sound: number | null }[]>([]);

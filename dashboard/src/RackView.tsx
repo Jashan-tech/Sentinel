@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, type ReactNode } from "react";
+import { useRover } from "./RoverLive";
 import { Timestamp } from "spacetimedb";
 import { useSpacetimeDB, useTable } from "spacetimedb/react";
 import { DbConnection, tables } from "./module_bindings";
@@ -32,6 +33,29 @@ export default function RackView({
   );
   const [profileSources] = useTable(tables.rackProfileSource);
   const [mode, setMode] = useState<"live" | "simulation">("live");
+  // Live view = the rover's real sensors (polled from the Jetson). Simulated values show only in Simulation.
+  const rover = useRover();
+  const liveReading = (metric: string) => {
+    const d = rover.data;
+    if (!d || rover.error || d.age_s === null || d.age_s > 5) return undefined;
+    const v =
+      metric === "AMBIENT_TEMPERATURE_C" ? d.temp_c
+      : metric === "RELATIVE_HUMIDITY_PERCENT" ? d.hum
+      : metric === "SOUND_RAW" ? d.sound
+      : metric === "ULTRASONIC_DISTANCE_CM" ? d.dist_cm
+      : null;
+    if (v === null || v === undefined) return undefined;
+    return {
+      metricType: metric,
+      numericValue: v,
+      sourceType: "ROVER",
+      sourceIdentifier: "sentinel-rover-01 (live)",
+      observedAt: Timestamp.now(),
+      ingestedAt: Timestamp.now(),
+    };
+  };
+  const shown = (metric: string) =>
+    mode === "live" ? liveReading(metric) : current.find((r) => r.metricType === metric);
   const [freshness, setFreshness] = useState(60);
   const [now, setNow] = useState(Date.now());
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -82,9 +106,7 @@ export default function RackView({
       : complete
         ? "No threshold breach"
         : "Incomplete telemetry";
-  const distance = current.find(
-    (r) => r.metricType === "ULTRASONIC_DISTANCE_CM",
-  );
+  const distance = shown("ULTRASONIC_DISTANCE_CM");
 
   async function commit(action: (db: DbConnection) => Promise<void>) {
     const db = state.getConnection() as DbConnection | null;
@@ -207,18 +229,22 @@ export default function RackView({
         <div className="readings-head">
           <h2 id="telemetry-title">Live Telemetry</h2>
           <span className="source-tag">
-            {current.length
-              ? current.every((r) => r.sourceType === "SIMULATOR")
-                ? "Simulated source"
-                : current.some((r) => r.sourceType === "SIMULATOR")
-                  ? "Mixed sources"
-                  : "Live source"
-              : "Awaiting data"}
+            {mode === "live"
+              ? rover.data && !rover.error
+                ? "Live rover sensors"
+                : "Rover offline"
+              : current.length
+                ? current.every((r) => r.sourceType === "SIMULATOR")
+                  ? "Simulated source"
+                  : current.some((r) => r.sourceType === "SIMULATOR")
+                    ? "Mixed sources"
+                    : "Live source"
+                : "Awaiting data"}
           </span>
         </div>
         <div className="telemetry-rows readings-grid">
           {environmental.map((m, i) => {
-            const reading = current.find((r) => r.metricType === m.id);
+            const reading = shown(m.id);
             const violation =
               reading && profile
                 ? evaluate(m.id, reading.numericValue, profile, profileSource ? "manufacturer-documented" : "demonstration")
@@ -247,7 +273,9 @@ export default function RackView({
                         ? "Synchronizing"
                         : reading
                           ? `${reading.sourceType === "SIMULATOR" ? "Simulated" : "Live"} · ${old ? "Stale" : "Fresh"}`
-                          : "No observation"}
+                          : mode === "live"
+                            ? "Rover offline"
+                            : "No observation"}
                   </span>
                 </div>
                 <div
