@@ -17,6 +17,8 @@ export interface AgentConfig {
   maxSpecialistToolRounds: number;
   maxVerificationRetries: number;
   maxInvestigationSeconds: number;
+  /** Budget when an image is supplied: Vision plus mandatory multimodal verification need more time. */
+  maxVisualInvestigationSeconds: number;
   /** Multimodal model for the Vision Agent (must accept image input). */
   visionModel: string;
 }
@@ -50,6 +52,7 @@ export function loadConfig(): AgentConfig {
     maxSpecialistToolRounds: Math.min(intEnv("MAX_SPECIALIST_TOOL_ROUNDS", 3), 3),
     maxVerificationRetries: Math.min(intEnv("MAX_VERIFICATION_RETRIES", 1, 0), 1),
     maxInvestigationSeconds: intEnv("MAX_INVESTIGATION_SECONDS", 90),
+    maxVisualInvestigationSeconds: intEnv("MAX_VISUAL_INVESTIGATION_SECONDS", 130),
     visionModel: process.env.NVIDIA_VISION_MODEL?.trim() || DEFAULT_VISION_MODEL,
     baseURL: process.env.NVIDIA_BASE_URL?.trim() || "https://integrate.api.nvidia.com/v1",
     maxRounds: Math.min(intEnv("MAX_INVESTIGATION_ROUNDS", HARD_MAX_ROUNDS), HARD_MAX_ROUNDS),

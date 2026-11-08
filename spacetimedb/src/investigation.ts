@@ -1,7 +1,8 @@
-// Validation for client-submitted AI investigation records (Feature 2 integration).
-// These checks keep stored records well-formed and self-consistent. They do NOT
-// authenticate that a report was produced by the agent service: in this local demo
-// any connected identity may submit one. See README "AI investigation trust model".
+// Validation for AI investigation records.
+// Trust model (fix/investigation-integrity, issue 5): browsers may only START an investigation,
+// attach its image provenance, or ABANDON their own run as FAILED with no diagnosis. Reports are
+// recorded only by an agent identity that the database admin explicitly authorized. These checks
+// additionally keep every stored report well-formed and consistent with its row.
 
 export const INVESTIGATION_STATUSES = ["RUNNING", "COMPLETED", "INCOMPLETE", "FAILED"] as const;
 export const SEVERITIES = ["NORMAL", "WARNING", "CRITICAL", "UNKNOWN"] as const;
@@ -32,28 +33,83 @@ export function validateInvestigationStart(args: { investigationId: string; rack
   assertNoImagePayload("Snapshot", args.snapshotJson);
 }
 
-export function validateInvestigationCompletion(args: {
-  status: string;
-  severity: string;
-  reportJson: string;
-  eventsJson: string;
-}) {
+export const VERIFICATION_OUTCOMES = ["VERIFIED", "NOT_GROUNDED", "INCOMPLETE", "FAILED", "NOT_RUN", "NOT_REQUIRED"] as const;
+const REPORT_ARRAYS = [
+  "hypotheses",
+  "recommended_next_inspection",
+  "tool_calls",
+  "agents_invoked",
+  "specialist_findings",
+  "verified_findings",
+  "missing_information",
+  "limits_reached",
+  "incomplete_reasons",
+  "unsupported_claims",
+] as const;
+
+/** Agent-recorded completion. `rackId` is the investigated rack from the stored row. */
+export function validateInvestigationCompletion(
+  args: { status: string; severity: string; reportJson: string; eventsJson: string },
+  rackId: string,
+) {
   if (!(INVESTIGATION_STATUSES as readonly string[]).includes(args.status) || args.status === "RUNNING")
     throw new Error("Completion status must be COMPLETED, INCOMPLETE or FAILED");
   if (!(SEVERITIES as readonly string[]).includes(args.severity)) throw new Error("Invalid severity");
   const report = parseJson(args.reportJson, "Report", MAX_REPORT_CHARS);
   const events = parseJson(args.eventsJson, "Events", MAX_EVENTS_CHARS);
   if (!isObject(report)) throw new Error("Report must be a JSON object");
-  if (!Array.isArray(events)) throw new Error("Events must be a JSON array");
+  if (!Array.isArray(events) || !events.every((e) => isObject(e) && typeof e.type === "string" && typeof e.description === "string"))
+    throw new Error("Events must be a JSON array of timeline events");
   assertNoImagePayload("Report", args.reportJson);
-  // A report that came back from the agent must agree with the stored summary columns.
-  if ("investigation_status" in report || "severity" in report) {
-    if (report.investigation_status !== args.status || report.severity !== args.severity)
-      throw new Error("Report status/severity do not match the submitted values");
-  } else if (args.status !== "FAILED" || args.severity !== "UNKNOWN") {
-    // No agent report (e.g. agent unreachable): may only be recorded as a failure.
-    throw new Error("A record without an agent report must be FAILED with UNKNOWN severity");
+  assertNoImagePayload("Events", args.eventsJson);
+  // The report must describe this investigation's rack and agree with the summary columns.
+  if (report.rack_id !== rackId) throw new Error(`Report rack_id ${JSON.stringify(report.rack_id)} does not match investigated rack ${rackId}`);
+  if (report.investigation_status !== args.status || report.severity !== args.severity)
+    throw new Error("Report status/severity do not match the submitted values");
+  if (typeof report.summary !== "string" || !report.summary.trim()) throw new Error("Report has no summary");
+  for (const k of REPORT_ARRAYS) if (!Array.isArray(report[k])) throw new Error(`Report field ${k} must be an array`);
+  if (!isObject(report.evidence)) throw new Error("Report has no evidence object");
+  if (!(VERIFICATION_OUTCOMES as readonly string[]).includes(report.verification_outcome as string))
+    throw new Error("Report has an invalid verification_outcome");
+  const reasons = report.incomplete_reasons as unknown[];
+  // Processing completion and verification quality must be consistent (issue 3).
+  if (args.status === "COMPLETED") {
+    if (reasons.length) throw new Error("A COMPLETED report cannot list incomplete reasons");
+    if (report.verification_outcome !== "VERIFIED" && report.verification_outcome !== "NOT_REQUIRED")
+      throw new Error("A COMPLETED report requires VERIFIED (or NOT_REQUIRED) verification");
+  } else if (!reasons.length) {
+    throw new Error("An INCOMPLETE or FAILED report must state why");
   }
+  if (args.status === "FAILED" && args.severity !== "UNKNOWN") throw new Error("A FAILED investigation must have UNKNOWN severity");
+}
+
+export const MAX_ABANDON_REASON = 500;
+/** What a browser may store when it gives up on its own run: FAILED, UNKNOWN, no diagnosis. */
+export function abandonedReport(reason: string): string {
+  const clean = reason.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, MAX_ABANDON_REASON) || "Investigation abandoned by the client";
+  return JSON.stringify({ error: clean, recorded_by: "CLIENT", diagnosis: null });
+}
+export function expiredReport(seconds: number): string {
+  return JSON.stringify({
+    error: `No completion was recorded within ${seconds} s; the database marked this investigation as failed.`,
+    recorded_by: "DATABASE",
+    diagnosis: null,
+  });
+}
+
+// ---- Stale recovery and retention (issues 7, 10) ----
+export const DEFAULT_RUNNING_TIMEOUT_SECONDS = 300; // agent hard stop is ~145 s; client gives up at 180 s
+export const EXPIRY_INTERVAL_SECONDS = 60;
+export const MAX_INVESTIGATIONS_PER_RACK = 20;
+
+export function isStaleRunning(row: { status: string; createdMicros: bigint }, nowMicros: bigint, timeoutSeconds: number) {
+  return row.status === "RUNNING" && nowMicros - row.createdMicros > BigInt(timeoutSeconds) * 1_000_000n;
+}
+
+/** Oldest terminal investigations beyond the per-rack limit. RUNNING rows are never deleted. */
+export function retentionDeletions(rows: { id: string; status: string; createdMicros: bigint }[], keep = MAX_INVESTIGATIONS_PER_RACK): string[] {
+  const newestFirst = [...rows].sort((a, b) => (a.createdMicros < b.createdMicros ? 1 : a.createdMicros > b.createdMicros ? -1 : a.id < b.id ? 1 : -1));
+  return newestFirst.slice(keep).filter((r) => r.status !== "RUNNING").map((r) => r.id);
 }
 
 // ---- Image provenance (Feature 4) ----

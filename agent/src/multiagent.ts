@@ -3,6 +3,7 @@
  * Documentation, Vision and Verification agents (each its own Nemotron call loop with its own tools
  * or, for Vision, the actual image) over a single shared-state LangGraph.
  */
+import { createHash } from "node:crypto";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import {
   AIMessage,
@@ -41,6 +42,7 @@ import {
   type InvestigationRequest,
   type SpecialistFinding,
   type VerificationResult,
+  type VerificationOutcome,
 } from "./schemas.js";
 
 export interface MultiAgentOptions {
@@ -59,6 +61,8 @@ export interface MultiAgentOptions {
   /** Multimodal Nemotron model for the Vision Agent (and Verification when images exist). */
   visionModel?: InvestigatorModel;
   visionModelName?: string;
+  /** Cancels the investigation (e.g. the HTTP client disconnected). */
+  signal?: AbortSignal;
 }
 
 export interface MultiAgentResult {
@@ -73,6 +77,10 @@ type ContentPart =
 
 /** Time kept in reserve for the final synthesis call. */
 const FINAL_RESERVE_MS = 15_000;
+/** Minimum time a verification call needs; kept in reserve whenever an image is supplied. */
+const VERIFY_RESERVE_MS = 20_000;
+/** Hard stop after the budget: the final synthesis may use this grace, nothing may run past it. */
+const HARD_GRACE_MS = 15_000;
 const MAX_CONTEXT_CHARS = 9_000;
 
 // ---------------------------------------------------------------- prompts
@@ -145,7 +153,7 @@ Give 3-10 visual_findings. Be concise.`,
 
   verification: `You are the VERIFICATION AGENT of SENTINEL, an independent reviewer.
 You receive findings written by other agents. Do NOT restate them; judge them.
-- Spot-check factual claims with current telemetry/history; verify every trend using analyze_telemetry_trends and indicators. Verify manufacturer citations and applicability with lookup_equipment_documentation and get_rack_profile. Reject numerical calculations or model identities not returned by these tools.
+- Code-computed thresholds, trends, early-warning indicators and the documentation match are given to you; they are authoritative. Check trend claims against them; call analyze_telemetry_trends only for a source they do not cover. Spot-check specific readings with current telemetry/history, and manufacturer citations with lookup_equipment_documentation. Reject numerical calculations or model identities not supported by this evidence or your tools.
 - Flag claims not supported by tool data, root-cause claims stated as fact, and contradictions between agents or with the data.
 - List evidence that is missing for the conclusions drawn.
 - Only list a claim in verified_findings if the tool data supports it.
@@ -213,6 +221,75 @@ Rules:
   them separate from measured telemetry. A visual observation is never a confirmed fault or cause.`;
 
 // ---------------------------------------------------------------- helpers
+
+/** Compact, code-computed monitoring digest for repeated prompts (full detail stays in the report evidence). */
+export function compactMonitoring(trends: any[], indicators: any[], documentationMatch: any) {
+  const r2 = (v: unknown) => (typeof v === "number" ? Math.round(v * 100) / 100 : v);
+  return {
+    trends: trends
+      .filter((t) => t.series?.length)
+      .map((t) => ({
+        metric: t.metric_type,
+        thresholds: { warning: t.thresholds?.warning ?? null, critical: t.thresholds?.critical ?? null, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
+        series: t.series.map((s: any) => ({
+          source: s.source_identifier,
+          provenance: s.provenance,
+          n: s.observation_count,
+          window: [s.observation_window?.first_observed_at, s.observation_window?.last_observed_at],
+          first: r2(s.first_value),
+          last: r2(s.last_value),
+          min: r2(s.minimum),
+          max: r2(s.maximum),
+          direction: s.direction,
+          stale: s.stale,
+          warning_violations: s.threshold_violations,
+          critical_violations: s.critical_violations,
+          data_quality: s.data_quality,
+        })),
+        omitted_source_series: t.omitted_source_series || undefined,
+      })),
+    indicators: indicators.map((i) => ({
+      metric: i.metric,
+      classification: i.classification,
+      severity: i.severity,
+      rule: i.triggering_rule,
+      source: i.observed_evidence?.source_identifier ?? null,
+    })),
+    documentation_match: documentationMatch
+      ? Object.fromEntries(
+          ["match_status", "manufacturer_specification_available", "matched_manufacturer", "matched_model", "reason"]
+            .filter((k) => k in documentationMatch)
+            .map((k) => [k, documentationMatch[k]]),
+        )
+      : null,
+  };
+}
+
+/** Evidence identity of one reading: id (when known), provenance, value, unit and both timestamps. */
+export const readingKey = (m: any) =>
+  JSON.stringify([
+    m.observation_id ?? null,
+    m.metric_type,
+    m.source_type,
+    m.source_identifier,
+    m.simulated,
+    m.numeric_value,
+    m.unit,
+    m.observed_at,
+    m.ingested_at,
+  ]);
+
+/** Contradictions the verifier actually reported (live models sometimes list "No contradiction ..." entries). */
+export const realContradictions = (v: { contradictions: string[] }) =>
+  v.contradictions.filter((c) => c.trim() && !/^\s*(no|none)\b/i.test(c));
+
+const normClaim = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+/** Two claims are the same if one (normalized) contains the other; short fragments never match. */
+export function sameClaim(a: string, b: string): boolean {
+  const x = normClaim(a), y = normClaim(b);
+  if (x.length < 12 || y.length < 12) return x === y && x.length > 0;
+  return x.includes(y) || y.includes(x);
+}
 
 function clip(s: string, n = MAX_CONTEXT_CHARS): string {
   return s.length <= n ? s : `${s.slice(0, n)}...[truncated]`;
@@ -316,6 +393,8 @@ const State = Annotation.Root({
   findings: keep<SpecialistFinding[]>(() => []),
   verificationResult: keep<VerificationResult | null>(() => null),
   verificationRuns: keep<number>(() => 0),
+  /** findings.length when verification last ran (-1 = never). Findings after it are unverified. */
+  verifiedThrough: keep<number>(() => -1),
   delegations: keep<number>(() => 0),
   limitsReached: keep<string[]>(() => []),
   fatalError: keep<string | null>(() => null),
@@ -331,6 +410,22 @@ export async function runMultiAgentInvestigation(
   const started = Date.now();
   const deadline = started + opts.maxInvestigationSeconds * 1000;
   const remaining = () => deadline - Date.now();
+  // Enforced deadline: every model call carries an AbortSignal (per-call budget + investigation-wide
+  // hard stop + caller cancellation). A per-request HTTP timeout alone is multiplied by client retries.
+  const hardDeadline = deadline + HARD_GRACE_MS;
+  const controller = new AbortController();
+  const onCancel = () => controller.abort(new Error("Investigation cancelled by the caller"));
+  if (opts.signal?.aborted) onCancel();
+  opts.signal?.addEventListener("abort", onCancel, { once: true });
+  const hardTimer = setTimeout(
+    () => controller.abort(new Error(`Investigation deadline exceeded (${opts.maxInvestigationSeconds}s budget)`)),
+    Math.max(0, hardDeadline - Date.now()),
+  );
+  /** Call options for one model call that must finish `reserveMs` before the soft deadline. */
+  const callOpts = (reserveMs: number, minMs = 1000) => {
+    const ms = Math.min(Math.max(minMs, remaining() - reserveMs), Math.max(1, hardDeadline - Date.now()));
+    return { timeout: ms, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(ms)]) };
+  };
 
   // Per-request collectors (never shared between investigations).
   const events: InvestigationEvent[] = [];
@@ -351,7 +446,8 @@ export async function runMultiAgentInvestigation(
   const evidence: Evidence = {
     measurements: [],
     history: [],
-    configured_thresholds: null,
+    // Known by code from the request; never depends on which tools an agent happened to call.
+    configured_thresholds: { ...request.profile, provenance: "FICTIONAL_DEMO_CONFIGURATION" },
     documentation: [],
     images: images.map((i) => i.provenance),
     trends: deterministicTrends,
@@ -382,6 +478,17 @@ export async function runMultiAgentInvestigation(
     deterministicIndicators.some(
       (i) => i.classification === "EARLY_WARNING_TREND",
     );
+  const monitoringFull = clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 12000);
+  const monitoringCompact = clip(JSON.stringify(compactMonitoring(deterministicTrends, deterministicIndicators, documentationMatch)), 5000);
+  const hasContent = (f: SpecialistFinding) =>
+    f.observations.length > 0 ||
+    f.hypotheses.length > 0 ||
+    (f.visual_findings?.length ?? 0) > 0;
+  /** Findings with content that no verification run has reviewed yet. */
+  const unverified = (state: S) =>
+    state.findings.slice(Math.max(0, state.verifiedThrough)).filter(hasContent);
+  /** Time the Supervisor must leave for the steps that always follow it. */
+  const supervisorReserve = FINAL_RESERVE_MS + (images.length ? VERIFY_RESERVE_MS : 0);
   const rackHeader = `Rack "${request.rack_id}" (${request.rack_name}), equipment type: ${request.equipment_type}. Reference time (as_of): ${request.as_of ?? new Date(started).toISOString()}.`;
 
   /** Record actual tool output as evidence (code-compiled, not model-written). */
@@ -394,23 +501,33 @@ export async function runMultiAgentInvestigation(
     }
     if (r?.error) return;
     for (const m of r.readings ?? []) {
-      const k = `m|${m.metric_type}|${m.source_identifier}|${m.observed_at}`;
+      // The full reading identity: provenance + value + both timestamps (+ id when known).
+      // Distinct valid readings never collapse; the same reading returned twice is kept once.
+      const k = `m|${readingKey(m)}`;
       if (!seen.has(k)) seen.add(k) && evidence.measurements.push(m);
     }
-    if (r.available === true && Array.isArray(r.observations)) {
-      const k = `h|${r.metric_type}|${r.returned}`;
+    if (r.available === true && Array.isArray(r.observations) && r.observations.length) {
+      // History is identified by its actual observation window and contents, not its size.
+      const windowId = createHash("sha256")
+        .update(JSON.stringify([r.metric_type, ...r.observations.map(readingKey)]))
+        .digest("hex")
+        .slice(0, 16);
+      const k = `h|${windowId}`;
       if (!seen.has(k)) {
         seen.add(k);
         evidence.history.push({
+          window_id: windowId,
           metric_type: r.metric_type,
           observations: r.returned,
           order: r.order,
           from: r.observations[0]?.observed_at,
           to: r.observations.at(-1)?.observed_at,
           stats: r.stats,
+          observation_ids: r.observations.map((o: any) => o.observation_id ?? null),
           source_identifiers: [
             ...new Set(r.observations.map((o: any) => o.source_identifier)),
           ],
+          source_types: [...new Set(r.observations.map((o: any) => o.source_type))],
           simulated: r.observations.every((o: any) => o.simulated),
         });
       }
@@ -451,6 +568,7 @@ export async function runMultiAgentInvestigation(
     userContent: string | ContentPart[],
     schema: T,
     model: InvestigatorModel = opts.specialistModel,
+    reserveMs = 0,
   ): Promise<{
     output: z.infer<T> | null;
     records: AgentToolCallRecord[];
@@ -471,9 +589,7 @@ export async function runMultiAgentInvestigation(
 
     try {
       while (true) {
-        let resp = await bound.invoke(msgs, {
-          timeout: Math.max(1000, remaining()),
-        });
+        let resp = await bound.invoke(msgs, callOpts(reserveMs));
         let calls = resp.tool_calls ?? [];
         if (
           (resp.invalid_tool_calls?.length ?? 0) > 0 &&
@@ -517,7 +633,7 @@ export async function runMultiAgentInvestigation(
                 "Your tool budget is used up. Reply now with ONLY the JSON object from your instructions.",
               ),
             ],
-            { timeout: Math.max(1000, remaining()) },
+            callOpts(reserveMs),
           );
           text = textOf(resp);
           break;
@@ -588,7 +704,7 @@ export async function runMultiAgentInvestigation(
                 `Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`,
               ),
             ],
-            { timeout: Math.max(1000, remaining()) },
+            callOpts(reserveMs),
           );
           text = textOf(fix);
         }
@@ -639,9 +755,7 @@ export async function runMultiAgentInvestigation(
     let text = "";
     try {
       text = textOf(
-        await visionModel.invoke(msgs, {
-          timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS / 2),
-        }),
+        await visionModel.invoke(msgs, callOpts(FINAL_RESERVE_MS + VERIFY_RESERVE_MS / 2)),
       );
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
@@ -666,7 +780,7 @@ export async function runMultiAgentInvestigation(
                   `Invalid output (${errMsg(err).slice(0, 300)}). Reply with ONLY the corrected JSON object.`,
                 ),
               ],
-              { timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS / 2) },
+              callOpts(FINAL_RESERVE_MS + VERIFY_RESERVE_MS / 2),
             ),
           );
         }
@@ -709,7 +823,7 @@ export async function runMultiAgentInvestigation(
       };
     };
 
-    if (remaining() < FINAL_RESERVE_MS) {
+    if (remaining() < supervisorReserve) {
       return finish(
         `Time budget (${opts.maxInvestigationSeconds}s) nearly used; finishing`,
         "MAX_INVESTIGATION_SECONDS",
@@ -724,7 +838,7 @@ export async function runMultiAgentInvestigation(
 Inspection requested by operator: ${inspectionMode}. ${imageLine}
 Active alerts: ${request.active_alerts.length ? request.active_alerts.map((a) => `[${a.severity}] ${a.message}`).join("; ") : "none"}
 Equipment identity: ${JSON.stringify(request.equipment_identity ?? null)} (operator assertion only; profile/photo never establishes identity).
-Deterministic monitoring evidence: ${clip(JSON.stringify({ trends: deterministicTrends, indicators: deterministicIndicators, documentation_match: documentationMatch }), 12000)}
+Deterministic monitoring evidence${state.delegations === 0 ? "" : " (compact digest; full detail was given in your first decision)"}: ${state.delegations === 0 ? monitoringFull : monitoringCompact}
 Data inventory (counts only): ${JSON.stringify(dataInventory(request, opts.staleAfterMinutes))}
 Budget: ${state.delegations}/${opts.maxDelegations} delegations used; verification runs ${state.verificationRuns}/${opts.maxVerificationRetries + 1}; ~${Math.round(remaining() / 1000)}s left.
 Your plan so far: ${state.plan || "(none yet - include a plan)"}
@@ -741,9 +855,7 @@ Decide the next step.`;
       let text: string;
       try {
         text = textOf(
-          await opts.supervisorModel.invoke(msgs, {
-            timeout: Math.max(1000, remaining() - FINAL_RESERVE_MS),
-          }),
+          await opts.supervisorModel.invoke(msgs, callOpts(FINAL_RESERVE_MS)),
         );
       } catch (err) {
         emit("ERROR", `Supervisor model call failed: ${errMsg(err)}`, "ERROR", {
@@ -806,6 +918,27 @@ Decide the next step.`;
         ),
       };
     }
+    // Re-running a COMPLETED verification over the same findings changes nothing and doubles its cost
+    // (seen live: verification -> verification with no new findings in between).
+    if (
+      next === "verification" &&
+      state.verificationRuns > 0 &&
+      state.verificationResult?.status === "COMPLETED" &&
+      unverified(state).length === 0
+    ) {
+      emit("GUARD", "No new findings since the last completed verification; not re-running it", "INFO", { agent: "supervisor" });
+      next = "finish";
+      objective = "";
+    }
+    // Verifying before any agent has produced findings checks nothing (seen live: verification ran first).
+    if (next === "verification" && !state.findings.some(hasContent)) {
+      next = images.length && !visionRan ? "vision" : "telemetry";
+      objective =
+        next === "vision"
+          ? "Inspect the operator-supplied photograph and report what is directly visible."
+          : "Check current readings and their freshness against the rack profile thresholds.";
+      emit("GUARD", `Nothing to verify yet; routing to ${next} first`, "INFO", { agent: "supervisor" });
+    }
     if (next === "vision" && !images.length) {
       emit(
         "GUARD",
@@ -862,6 +995,7 @@ Decide the next step.`;
     if (
       next !== "finish" &&
       next !== "verification" &&
+      next !== "vision" && // verifying before the photo is inspected is useless; the gate verifies after it
       verificationRequired &&
       state.delegations === opts.maxDelegations - 1
     ) {
@@ -904,25 +1038,8 @@ Decide the next step.`;
         "INFO",
         { agent: "supervisor" },
       );
-    } else if (
-      next === "finish" &&
-      (policySeverity !== "NORMAL" ||
-        deterministicIndicators.some(
-          (i) => i.classification === "EARLY_WARNING_TREND",
-        )) &&
-      state.verificationRuns === 0 &&
-      state.delegations < opts.maxDelegations
-    ) {
-      next = "verification";
-      objective =
-        "Independently check the specialist findings against the data before the report is written.";
-      emit(
-        "GUARD",
-        `Rack is not clearly normal (${policySeverity}); verification required before finishing`,
-        "INFO",
-        { agent: "supervisor" },
-      );
     }
+    // Required verification before finishing is enforced by the deterministic verification gate.
 
     if (next === "finish") {
       emit("SUPERVISOR", `Decided to finish: ${decision.reason}`, "INFO", {
@@ -1055,7 +1172,12 @@ Decide the next step.`;
     emit("AGENT", `verification agent started: ${objective}`, "INFO", {
       agent: "verification",
     });
-    const verifyText = `${rackHeader}\nObjective: ${objective}\nFindings to review:\n${findingsDigest(state.findings, null)}`;
+    const verifyText = `${rackHeader}\nObjective: ${objective}
+Code-computed evidence (authoritative; computed deterministically from the snapshot, not by any agent):
+configured thresholds: ${JSON.stringify(evidence.configured_thresholds)}
+monitoring: ${monitoringCompact}
+Use tools only for claims this evidence does not cover (specific readings or samples, documentation citations, another source).
+Findings to review:\n${findingsDigest(state.findings, null)}`;
     const withImage =
       images.length > 0 &&
       state.findings.some(
@@ -1073,8 +1195,9 @@ Decide the next step.`;
           ],
           VerificationOutput,
           visionModel,
+          FINAL_RESERVE_MS,
         )
-      : await runAgent("verification", verifyText, VerificationOutput);
+      : await runAgent("verification", verifyText, VerificationOutput, opts.specialistModel, FINAL_RESERVE_MS);
     const v: VerificationResult = {
       grounded: res.output?.grounded ?? false,
       verified_findings: res.output?.verified_findings ?? [],
@@ -1106,11 +1229,91 @@ Decide the next step.`;
     return {
       verificationResult: v,
       verificationRuns: state.verificationRuns + 1,
+      verifiedThrough: state.findings.length,
       assignments: [
         ...state.assignments,
         { agent: "verification", objective, status: v.status },
       ],
       delegations: state.delegations + 1,
+    };
+  }
+
+  // ---- Deterministic verification gate (every path to the final report passes here) ----
+  const FINISH: SupervisorDecision = { plan: undefined, next: "finish", objective: "", reason: "verification gate" };
+  async function verificationGate(state: S): Promise<Partial<S>> {
+    const pending = unverified(state);
+    if (!requiresVerification || pending.length === 0) return { decision: FINISH };
+    const mandatory = images.length > 0; // visual findings are never reported unverified
+    const who = [...new Set(pending.map((f) => f.agent))].join(", ");
+    if (!mandatory && (state.delegations >= opts.maxDelegations || state.verificationRuns > opts.maxVerificationRetries)) {
+      emit("GUARD", `Verification is required but its budget is exhausted; findings from ${who} remain unverified and the report will say so`, "INFO", { agent: "supervisor" });
+      return { decision: FINISH };
+    }
+    if (remaining() < FINAL_RESERVE_MS + VERIFY_RESERVE_MS / 2) {
+      emit("GUARD", `${mandatory ? "Mandatory visual verification" : "Required verification"} could not run: time budget exhausted; findings from ${who} remain unverified`, "ERROR", { agent: "supervisor" });
+      return {
+        decision: FINISH,
+        limitsReached: state.limitsReached.includes("VERIFICATION_TIMEOUT") ? state.limitsReached : [...state.limitsReached, "VERIFICATION_TIMEOUT"],
+      };
+    }
+    emit("GUARD", `${mandatory ? "Mandatory visual verification" : "Verification required"}: ${pending.length} finding(s) from ${who} not yet verified; routing to verification before the report`, "INFO", { agent: "supervisor" });
+    return {
+      decision: {
+        plan: undefined,
+        next: "verification",
+        objective: "Independently check all findings (including any visual observations) against the data and the photograph before the report is written.",
+        reason: "verification gate",
+      },
+    };
+  }
+
+  /** Verification outcome and status, computed by code from what actually happened (never model-written). */
+  function assess(state: S, synthesisOk: boolean) {
+    const latest = state.verificationResult;
+    const stale = unverified(state);
+    const outcome: VerificationOutcome = !latest
+      ? requiresVerification ? "NOT_RUN" : "NOT_REQUIRED"
+      : latest.status === "FAILED" ? "FAILED"
+      : latest.status === "INCOMPLETE" || (requiresVerification && stale.length > 0) ? "INCOMPLETE"
+      : !latest.grounded || realContradictions(latest).length > 0 ? "NOT_GROUNDED"
+      : "VERIFIED";
+    const reasons: string[] = [];
+    for (const l of state.limitsReached) reasons.push(`Limit reached: ${l}`);
+    for (const f of state.findings)
+      if (f.status !== "COMPLETED") reasons.push(`${f.agent} agent ${f.status.toLowerCase()}`);
+    if (outcome === "NOT_RUN")
+      reasons.push(
+        state.findings.some(hasContent)
+          ? "Required verification did not run"
+          : "Required verification did not run: no agent produced findings to verify",
+      );
+    if (outcome === "FAILED") reasons.push("Verification failed; no finding is verified");
+    if (outcome === "INCOMPLETE")
+      reasons.push(
+        latest?.status === "INCOMPLETE"
+          ? "Verification was incomplete; its accepted claims are not reported as verified"
+          : `Findings from ${[...new Set(stale.map((f) => f.agent))].join(", ")} were added after the last verification and are unverified`,
+      );
+    if (outcome === "NOT_GROUNDED")
+      reasons.push(
+        latest!.grounded
+          ? `Verification reported ${realContradictions(latest!).length} unresolved contradiction(s)`
+          : "Verification found the findings not grounded (grounded: false)",
+      );
+    if (!synthesisOk) reasons.push("Final report synthesis did not produce a valid report");
+    // Only claims the latest COMPLETED verification explicitly accepted, minus any it also rejected.
+    const rejected = latest ? [...latest.unsupported_claims, ...latest.contradictions] : [];
+    const verified =
+      latest?.status === "COMPLETED"
+        ? latest.verified_findings.filter((v) => !rejected.some((r) => sameClaim(v, r)))
+        : [];
+    return {
+      verification_required: requiresVerification,
+      verification_outcome: outcome,
+      verified_findings: verified,
+      unsupported_claims: latest?.unsupported_claims ?? [],
+      incomplete_reasons: reasons,
+      investigation_status: reasons.length ? ("INCOMPLETE" as const) : ("COMPLETED" as const),
     };
   }
 
@@ -1152,18 +1355,22 @@ Decide the next step.`;
     const failed = (
       summary: string,
       status: "FAILED" | "INCOMPLETE",
-    ): MultiAgentReport => ({
-      ...base,
-      severity: "UNKNOWN",
-      summary,
-      hypotheses: [],
-      recommended_next_inspection: [
-        "Review the specialist findings and evidence, then retry the investigation.",
-      ],
-      verified_findings: state.verificationResult?.verified_findings ?? [],
-      missing_information: [],
-      investigation_status: status,
-    });
+    ): MultiAgentReport => {
+      const a = assess(state, false);
+      return {
+        ...base,
+        ...a,
+        severity: "UNKNOWN",
+        summary,
+        hypotheses: [],
+        recommended_next_inspection: [
+          "Review the specialist findings and evidence, then retry the investigation.",
+        ],
+        missing_information: [],
+        investigation_status: status,
+        incomplete_reasons: status === "FAILED" ? [...a.incomplete_reasons, summary] : a.incomplete_reasons,
+      };
+    };
 
     if (state.fatalError) {
       report = failed(
@@ -1189,9 +1396,7 @@ Decide the next step.`;
       let text: string;
       try {
         text = textOf(
-          await opts.supervisorModel.invoke(msgs, {
-            timeout: Math.max(5000, remaining()),
-          }),
+          await opts.supervisorModel.invoke(msgs, callOpts(-HARD_GRACE_MS, 5000)),
         );
       } catch (err) {
         emit(
@@ -1215,11 +1420,26 @@ Decide the next step.`;
           );
           syn.severity = policySeverity;
         }
-        const status = state.limitsReached.length ? "INCOMPLETE" : "COMPLETED";
+        const a = assess(state, true);
+        // The synthesis may not declare anything verified, nor re-introduce rejected claims.
+        const invented = syn.verified_findings.filter((v) => !a.verified_findings.some((x) => sameClaim(v, x)));
+        if (invented.length)
+          emit("GUARD", `Ignored ${invented.length} "verified" finding(s) from the synthesis that the Verification Agent did not accept`, "INFO", { agent: "supervisor" });
+        const kept = syn.hypotheses.filter((h) => !a.unsupported_claims.some((c) => sameClaim(h.description, c)));
+        const removed = syn.hypotheses.filter((h) => !kept.includes(h));
+        if (removed.length)
+          emit(
+            "GUARD",
+            `Removed ${removed.length} hypothesis(es) that restated claims verification marked unsupported: ${removed.map((h) => `"${h.description.slice(0, 120)}"`).join("; ")}`,
+            "INFO",
+            { agent: "supervisor" },
+          );
+        const status = a.investigation_status;
         report = MultiAgentReport.parse({
           ...base,
           ...syn,
-          investigation_status: status,
+          ...a,
+          hypotheses: kept,
         });
         emit(
           "REPORT",
@@ -1252,9 +1472,11 @@ Decide the next step.`;
   }
 
   const route = (state: S) =>
-    state.fatalError || !state.decision || state.decision.next === "finish"
+    state.fatalError
       ? "final"
-      : state.decision.next;
+      : !state.decision || state.decision.next === "finish"
+        ? "gate"
+        : state.decision.next;
 
   const graph = new StateGraph(State)
     .addNode("supervisor", supervisor)
@@ -1263,6 +1485,7 @@ Decide the next step.`;
     .addNode("documentation", specialistNode("documentation"))
     .addNode("vision", visionNode)
     .addNode("verification", verificationNode)
+    .addNode("gate", verificationGate)
     .addNode("final", finalNode)
     .addEdge(START, "supervisor")
     .addConditionalEdges("supervisor", route, [
@@ -1270,6 +1493,11 @@ Decide the next step.`;
       "environment",
       "documentation",
       "vision",
+      "verification",
+      "gate",
+      "final",
+    ])
+    .addConditionalEdges("gate", (state: S) => (state.decision?.next === "verification" ? "verification" : "final"), [
       "verification",
       "final",
     ])
@@ -1288,10 +1516,13 @@ Decide the next step.`;
   try {
     await graph.invoke(
       { request },
-      { recursionLimit: opts.maxDelegations * 2 + 10 },
+      { recursionLimit: opts.maxDelegations * 4 + 20 },
     );
   } catch (err) {
     emit("ERROR", `Graph execution failed: ${errMsg(err)}`, "ERROR");
+  } finally {
+    clearTimeout(hardTimer);
+    opts.signal?.removeEventListener("abort", onCancel);
   }
   const final: MultiAgentReport = report ?? {
     rack_id: request.rack_id,
@@ -1313,6 +1544,10 @@ Decide the next step.`;
     limits_reached: [],
     inspection_mode: inspectionMode,
     visual_findings: [],
+    verification_required: requiresVerification,
+    verification_outcome: "NOT_RUN",
+    unsupported_claims: [],
+    incomplete_reasons: ["Investigation failed before a report could be produced"],
   };
   emit(
     "END",

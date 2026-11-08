@@ -9,6 +9,8 @@ import { readFileSync, mkdirSync } from "node:fs";
 import { chromium, expect } from "@playwright/test";
 import { Timestamp } from "spacetimedb";
 import { createApp } from "../agent/src/app.js";
+import { createSpacetimeStore } from "../agent/src/persistence.js";
+import { registerAgent } from "./register-agent.mjs";
 import {
   fakeModel,
   testConfig,
@@ -43,7 +45,10 @@ const verdict = j({
   request_more_investigation: false,
 });
 let serviceCalls = 0;
+// Reports are recorded by the agent service under its own authorized identity (issue 5).
+const agentIdentity = await registerAgent({ database: "sentinel-verification", label: "equipment-e2e" });
 const app = createApp({
+  store: createSpacetimeStore({ url: "http://127.0.0.1:3000", database: "sentinel-verification", token: agentIdentity.token }),
   getModel: () => {
     serviceCalls++;
     const supervisor = fakeModel([
@@ -184,7 +189,7 @@ try {
       sourceIdentifier: source,
       observedAt: new Timestamp(BigInt(now + offset) * 1000n),
     });
-  browser = await chromium.launch({ channel: "msedge", headless: true });
+  browser = await chromium.launch({ channel: process.env.E2E_BROWSER_CHANNEL ?? "msedge", headless: true });
   const [ca, cb] = await Promise.all([
     browser.newContext({ viewport: { width: 1440, height: 1100 } }),
     browser.newContext(),

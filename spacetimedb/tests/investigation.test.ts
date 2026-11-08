@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { validateInvestigationStart, validateInvestigationCompletion } from "../src/investigation";
 
 const ok = { investigationId: "0b9f4c2e-1111-2222-3333-444455556666", rackId: "rack-1", snapshotJson: '{"rack_id":"rack-1"}' };
-const report = (status: string, severity: string) => JSON.stringify({ investigation_status: status, severity, summary: "x" });
+const report = (status: string, severity: string, extra: object = {}) =>
+  JSON.stringify({
+    rack_id: "rack-1", investigation_status: status, severity, summary: "x",
+    hypotheses: [], recommended_next_inspection: [], tool_calls: [], agents_invoked: [], specialist_findings: [],
+    verified_findings: [], missing_information: [], limits_reached: [], unsupported_claims: [], evidence: {},
+    verification_outcome: status === "COMPLETED" ? "VERIFIED" : "NOT_RUN",
+    incomplete_reasons: status === "COMPLETED" ? [] : ["reason"],
+    ...extra,
+  });
 
 test("start: valid snapshot accepted; bad id, JSON, or rack mismatch rejected", () => {
   validateInvestigationStart(ok);
@@ -14,15 +22,18 @@ test("start: valid snapshot accepted; bad id, JSON, or rack mismatch rejected", 
 });
 
 test("completion: statuses, severities and report consistency are enforced", () => {
-  validateInvestigationCompletion({ status: "COMPLETED", severity: "CRITICAL", reportJson: report("COMPLETED", "CRITICAL"), eventsJson: "[]" });
-  validateInvestigationCompletion({ status: "INCOMPLETE", severity: "UNKNOWN", reportJson: report("INCOMPLETE", "UNKNOWN"), eventsJson: "[]" });
-  validateInvestigationCompletion({ status: "FAILED", severity: "UNKNOWN", reportJson: '{"error":"agent unreachable"}', eventsJson: "[]" });
-  assert.throws(() => validateInvestigationCompletion({ status: "RUNNING", severity: "UNKNOWN", reportJson: "{}", eventsJson: "[]" }), /status/);
-  assert.throws(() => validateInvestigationCompletion({ status: "COMPLETED", severity: "BAD", reportJson: "{}", eventsJson: "[]" }), /severity/);
+  const c = (status: string, severity: string, reportJson: string, eventsJson = "[]") =>
+    validateInvestigationCompletion({ status, severity, reportJson, eventsJson }, "rack-1");
+  c("COMPLETED", "CRITICAL", report("COMPLETED", "CRITICAL"));
+  c("INCOMPLETE", "UNKNOWN", report("INCOMPLETE", "UNKNOWN"));
+  c("FAILED", "UNKNOWN", report("FAILED", "UNKNOWN"));
+  assert.throws(() => c("RUNNING", "UNKNOWN", "{}"), /status/);
+  assert.throws(() => c("COMPLETED", "BAD", "{}"), /severity/);
   // A failed agent run cannot be stored as a success.
-  assert.throws(() => validateInvestigationCompletion({ status: "COMPLETED", severity: "NORMAL", reportJson: report("FAILED", "UNKNOWN"), eventsJson: "[]" }), /do not match/);
-  assert.throws(() => validateInvestigationCompletion({ status: "COMPLETED", severity: "NORMAL", reportJson: '{"error":"x"}', eventsJson: "[]" }), /must be FAILED/);
-  assert.throws(() => validateInvestigationCompletion({ status: "COMPLETED", severity: "CRITICAL", reportJson: report("COMPLETED", "CRITICAL"), eventsJson: "{}" }), /array/);
+  assert.throws(() => c("COMPLETED", "NORMAL", report("FAILED", "UNKNOWN")), /do not match/);
+  // Agents must submit a real report; "no report" failures are only possible via abandon_investigation.
+  assert.throws(() => c("FAILED", "UNKNOWN", '{"error":"x"}'), /rack_id/);
+  assert.throws(() => c("COMPLETED", "CRITICAL", report("COMPLETED", "CRITICAL"), "{}"), /array/);
 });
 
 import { validateInvestigationImage, assertNoImagePayload } from "../src/investigation";
@@ -57,7 +68,7 @@ test("image provenance: valid record accepted; bad hash, type, source, URL, size
 test("investigation rows never store image payloads", () => {
   assert.throws(() => validateInvestigationStart({ ...ok, snapshotJson: JSON.stringify({ rack_id: "rack-1", images: [{ data_base64: "/9j/" }] }) }), /must not contain image data/);
   assert.throws(
-    () => validateInvestigationCompletion({ status: "COMPLETED", severity: "NORMAL", reportJson: JSON.stringify({ investigation_status: "COMPLETED", severity: "NORMAL", x: "data:image/jpeg;base64,/9j/" }), eventsJson: "[]" }),
+    () => validateInvestigationCompletion({ status: "COMPLETED", severity: "NORMAL", reportJson: JSON.stringify({ investigation_status: "COMPLETED", severity: "NORMAL", x: "data:image/jpeg;base64,/9j/" }), eventsJson: "[]" }, "rack-1"),
     /must not contain image data/,
   );
   assertNoImagePayload("Snapshot", JSON.stringify({ rack_id: "rack-1", images: [{ image_id: "a", sha256: "b" }] }));

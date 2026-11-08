@@ -269,9 +269,30 @@ export interface AgentReport {
     documentation_match?: Record<string, unknown> | null;
   };
   limits_reached: string[];
+  /** Verification quality (separate from investigation_status). Absent on reports from older agents. */
+  verification_required?: boolean;
+  verification_outcome?: VerificationOutcome;
+  unsupported_claims?: string[];
+  incomplete_reasons?: string[];
   inspection_mode?: InspectionMode;
   visual_findings?: VisualFindingView[];
 }
+
+export type VerificationOutcome =
+  | "VERIFIED"
+  | "NOT_GROUNDED"
+  | "INCOMPLETE"
+  | "FAILED"
+  | "NOT_RUN"
+  | "NOT_REQUIRED";
+export const VERIFICATION_LABEL: Record<VerificationOutcome, string> = {
+  VERIFIED: "Verified",
+  NOT_GROUNDED: "Not grounded — unsupported claims found",
+  INCOMPLETE: "Verification incomplete",
+  FAILED: "Verification failed",
+  NOT_RUN: "Required verification did not run",
+  NOT_REQUIRED: "Verification not required",
+};
 
 export interface VisualFindingView {
   image_id: string;

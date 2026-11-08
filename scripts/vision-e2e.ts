@@ -13,7 +13,7 @@ const SQL = "http://127.0.0.1:3000/v1/database/sentinel/sql";
 const OUT = process.env.E2E_OUT ?? "test-results";
 const ASSETS = new URL("../agent/test-assets/vision/", import.meta.url);
 const IMAGE = process.argv[2] ?? "rack-switches-patch-panels.jpg";
-const TIMEOUT = 170_000;
+const TIMEOUT = 200_000; // agent: 130 s visual budget + synthesis; client gives up at 180 s
 
 const manifest = JSON.parse(readFileSync(new URL("manifest.json", ASSETS), "utf8"));
 const meta = manifest.images.find((m: any) => m.file === IMAGE);

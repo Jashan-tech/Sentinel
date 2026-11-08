@@ -20,7 +20,7 @@ import {
 /** Minimal model surface the graph needs (satisfied by ChatOpenAI and by test fakes). */
 export interface InvestigatorModel {
   bindTools(tools: StructuredToolInterface[]): Runnable<BaseMessage[], AIMessage>;
-  invoke(messages: BaseMessage[], config?: { timeout?: number }): Promise<AIMessage>;
+  invoke(messages: BaseMessage[], config?: { timeout?: number; signal?: AbortSignal }): Promise<AIMessage>;
 }
 
 export interface InvestigationOptions {

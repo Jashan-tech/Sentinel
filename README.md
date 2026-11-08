@@ -53,7 +53,10 @@ npm run db:start                     # terminal 1: SpacetimeDB on 127.0.0.1:3000
 npm run db:build                     # terminal 2: typecheck + build the module
 npm run db:publish                   # publish database "sentinel"
 npm run db:generate                  # regenerate dashboard client bindings
+npm run agent:register               # authorize the agent service to record reports (writes agent/.env)
 ```
+
+`agent:register` gives the agent service its own SpacetimeDB identity and authorizes it. Run it as the identity that published the database, which is your SpacetimeDB CLI login. On a database published before this change, it first claims the admin role once for that identity. Restart the agent afterwards. Without it, investigations fail with "Agent cannot record investigations".
 
 ### Run the app (three terminals)
 ```bash
@@ -106,7 +109,7 @@ All five agents run on **NVIDIA Nemotron 3.5 Super** (`nvidia/nemotron-3.5-super
 **The investigation adapts to the rack.** A normal rack usually gets one Telemetry check. A critical or contradictory rack gets three or four specialists, ending with Verification. Vision is offered to the Supervisor only when a photo is attached. The sequence is the Supervisor's own decision, not a fixed script.
 
 **Built-in safeguards**
-- Limits: at most 5 agent runs, 3 tool rounds per agent, 1 verification retry, and 90 s in total. Hitting any of them marks the report `INCOMPLETE`.
+- Limits: at most 5 agent runs, 3 tool rounds per agent, 1 verification retry, and 90 s in total (130 s when a photo is attached). Hitting any of them marks the report `INCOMPLETE`.
 - The Supervisor can't finish before any agent has examined the data. A non-normal rack, or any investigation with a photo, must go through verification, and the last delegation is reserved for it. An attached photo can't be skipped. An identical task is never repeated. Each time one of these rules steps in, it appears as a visible `GUARD` event in the timeline.
 - Severity follows the profile thresholds applied to fresh readings.
 - Malformed model output gets one repair attempt. An outright failure is marked `FAILED` and is never shown as a diagnosis.
@@ -123,10 +126,12 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 | `rack_profile` | public | Demo threshold profiles: Standard Network 32/40 °C and 70 %RH, High-Density Compute 27/33 °C and 60 %RH, Industrial Network 40/50 °C and 80 %RH |
 | `rack` | public | Racks and their selected profile |
 | `telemetry_observation` | **private** | Full, unchangeable archive of every accepted observation |
-| `recent_observation` | public | Last 50 observations per rack |
+| `recent_observation` | public | Last 50 observations per rack. When full, the oldest row of the (metric, source) group with the most rows is evicted, so a fast sensor can't push slower sensors or other metrics out |
 | `current_telemetry` | public | Latest reading per rack and metric, keyed `rackId:metricType` |
 | `rack_alert` | public | One alert slot per rack and metric: severity, message, active flag, resolution time |
 | `investigation` | public | One row per AI investigation: status, severity, the profile at run time, whether telemetry was simulated, the request snapshot, report JSON, events JSON, who submitted it, created and completed times. **Image bytes are rejected** |
+| `investigation_completion` | public | Who recorded each finished investigation: `AGENT` (the authorized agent service), `CLIENT_ABANDONED` (the browser that started it gave up) or `DATABASE_EXPIRED` (no result within 5 minutes) |
+| `admin_account`, `agent_authorization`, `module_setting`, `investigation_expiry` | **private** | The database admin, the agent identities allowed to record reports, admin settings, and the schedule for the stale-investigation sweep |
 | `investigation_image` | public | Provenance of an investigation's photo: image ID, filename, type, source type, capture time (only if known), server upload time, source URL, attribution, license, SHA-256, size, dimensions, and a JPEG preview of at most 60 KB. The full image is not stored |
 
 | Reducer | Purpose |
@@ -134,14 +139,17 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 | `ingest_simulated_observation` | Validates and stores one reading, keeps the recent and current tables up to date, and re-evaluates alerts. All of it happens in one transaction |
 | `change_rack_profile` | Changes a rack's profile and re-evaluates its current values |
 | `initialize_demo` | Seeds missing demo profiles and racks. Safe to run more than once |
-| `start_investigation` | Records a `RUNNING` investigation. The server works out the profile and the simulated flag itself |
-| `complete_investigation` | Stores the final report and events after validating them |
+| `start_investigation` | Records a `RUNNING` investigation. The server works out the profile and the simulated flag itself. It also expires stale runs on that rack and keeps the newest 20 investigations per rack, never deleting a running one |
+| `complete_investigation` | **Authorized agent identities only.** Stores the final report and events after validating them. An identical retry does nothing; a different second result is rejected |
+| `abandon_investigation` | Only the identity that started the run. Marks it `FAILED`/`UNKNOWN` with no diagnosis. Does nothing if the run already finished |
+| `expire_stale_investigations` | Scheduled every 60 s, not callable by clients. Marks `RUNNING` investigations older than the timeout (default 300 s) as `FAILED` |
+| `claim_admin`, `authorize_agent`, `revoke_agent`, `set_running_timeout` | Admin setup. `init` makes the owner admin on new databases; `claim_admin` works only while there is no admin yet |
 | `attach_investigation_image` | Stores a running investigation's image provenance. Only the identity that started it can call this, and only once |
 
 **Design notes (Feature 1)**
 - `ingested_at` always comes from the server clock. `observed_at` comes from the caller.
 - A delayed observation still enters history but never replaces a newer current value. When two readings share a timestamp, the first one is kept.
-- The recent table keeps 50 rows per rack, so dashboard subscriptions stay small. The private archive is never trimmed.
+- The recent table keeps 50 rows per rack, shared fairly between metrics and sources, so dashboard subscriptions stay small. The private archive is never trimmed.
 - Changing a profile re-evaluates the current values without rewriting any observations.
 - Freshness is shown on its own. It never implies health, resolves an alert, or fills in a missing reading.
 
@@ -165,7 +173,7 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 
 **Images (Feature 4)**
 - Only JPEG and PNG are accepted, up to 4 MB and 4096 px per side, and one image per investigation.
-- The browser and the agent each check the real file signature, the dimensions and that the image decodes. The declared type is never trusted on its own.
+- The browser and the agent each check the real file signature, the dimensions and that the image decodes. The agent decodes every pixel, checks PNG checksums and the exact amount of image data, and requires real JPEG scan data. The declared type is never trusted on its own.
 - The agent computes the SHA-256 of the bytes it actually received.
 - Source URLs are stored as metadata only and are **never fetched** by the server.
 - Capture time is stored only when the operator supplies it.
@@ -174,20 +182,31 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 - A Raspberry Pi camera can later use the same `POST /investigate` request with `source_type: "ROVER_CAMERA"` and a real capture time. The Vision Agent won't need changes.
 
 **Access control (local demo only)**
-- Any connected identity can submit readings, change profiles, or start and complete investigations.
+- Any connected identity can submit readings, change profiles, start investigations, or abandon its own run.
+- Only the agent identities authorized by the admin can record an investigation report.
 - Source identifiers are labels supplied by the user. `submitted_by` records the identity that actually submitted.
 - This is not production access control. Keep the server bound to loopback.
 
 **AI investigation records**
-- SpacetimeDB checks each record before storing it:
-  - the rack exists
-  - the JSON is well-formed and within the size limits
-  - the status and severity values are allowed, and they match the report
-  - only the identity that started an investigation can complete it
-  - a record without an agent report can only be saved as `FAILED`/`UNKNOWN`
-- SpacetimeDB derives the profile and the simulated flag from its own tables.
-- It does **not** prove that a report came from the agent service, so treat AI reports as unauthenticated advisory output.
-- The NVIDIA key stays in `agent/.env` on the server, and the browser reaches the agent only through the Vite `/api/agent` proxy.
+1. The browser stores the request snapshot (`start_investigation`) and the image provenance.
+2. It sends the agent only the investigation ID and the image bytes.
+3. The agent loads the **stored** snapshot from SpacetimeDB and checks the image against the recorded SHA-256. It then runs the investigation and records the report itself with `complete_investigation`, under its own authorized identity.
+4. The browser can't submit a report. If the agent can't be reached or can't record the result, the browser can only mark its own run `FAILED`/`UNKNOWN`. If nobody records anything, the database expires the run after 5 minutes.
+
+SpacetimeDB checks every report before storing it:
+- the report is for the investigated rack
+- the JSON is well-formed and within the size limits, with the required fields present and no image bytes
+- status and severity match the report
+- `COMPLETED` only with `VERIFIED` (or not required) verification and no incomplete reasons; `INCOMPLETE` and `FAILED` must say why
+- the run is still `RUNNING`
+
+`investigation_completion` records who wrote each final state. The profile and the simulated flag come from the database's own tables.
+
+The agent's SpacetimeDB token and the NVIDIA key stay in `agent/.env` on the server, and the browser reaches the agent only through the Vite `/api/agent` proxy. Reports are still AI advisory output, not confirmed diagnoses.
+
+**Report and image data in browsers**
+- Each rack keeps its newest 20 investigations, together with their image rows and completion rows. That bounds what a dashboard subscription downloads, at about 20 × (report up to 200 KB + preview up to 60 KB) per rack.
+- Investigation rows and image previews are **public**: any client connected to this database can read them. Both browsers need them to stay in sync, and the demo has no user accounts. Don't upload photos you wouldn't show everyone with access to the database. Full images are never stored.
 
 ---
 
@@ -197,7 +216,7 @@ The agent's API, configuration, tools and architecture are documented in [agent/
 |---|---|---|
 | `agent/.env` | `NVIDIA_API_KEY` | required |
 | `agent/.env` | `NVIDIA_MODEL`, `NVIDIA_SPECIALIST_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` |
-| `agent/.env` | `MAX_DELEGATIONS`, `MAX_SPECIALIST_TOOL_ROUNDS`, `MAX_VERIFICATION_RETRIES`, `MAX_INVESTIGATION_SECONDS` | 5, 3, 1, 90 |
+| `agent/.env` | `MAX_DELEGATIONS`, `MAX_SPECIALIST_TOOL_ROUNDS`, `MAX_VERIFICATION_RETRIES`, `MAX_INVESTIGATION_SECONDS`, `MAX_VISUAL_INVESTIGATION_SECONDS` | 5, 3, 1, 90, 130 |
 | `dashboard/.env.local` | `VITE_SPACETIME_URI`, `VITE_SPACETIME_DATABASE` | `ws://127.0.0.1:3000`, `sentinel` |
 | environment | `AGENT_URL` (target of the Vite proxy) | `http://127.0.0.1:3001` |
 | environment | `SPACETIME_CLI` (CLI path, if not on PATH) | `spacetime` |
@@ -222,11 +241,12 @@ See [the full equipment-intelligence contract and source registry](agent/EQUIPME
 
 | Command | What it covers | Last result |
 |---|---|---|
-| `npm test` | SpacetimeDB rules, investigation-record validation, image provenance, and the rule that rows never contain image bytes | 33/33 pass |
+| `npm test` | SpacetimeDB rules, investigation-record validation (rack match, structure, verification consistency), abandon and expiry records, retention, fair eviction, image provenance, and the rule that rows never contain image bytes | 42/42 pass |
 | `npm run typecheck` / `npm run build` | Module, dashboard and scripts / production dashboard build | pass |
-| `npm run db:verify:publish && npm run test:integration` | 15 checks against the real backend on the separate `sentinel-verification` database | 15/15 pass |
+| `npm run db:verify:publish && npm run test:integration` | Checks against the real backend on the separate `sentinel-verification` database, including forged, mismatched, duplicate and unauthorized completions, abandonment, expiry, retention and fair eviction | 27/27 pass |
 | `npm run test:browser` | Feature 1 two-browser sync, reload, offline/reconnect, mobile layout. Needs Microsoft Edge and a second dev server on :5174 (see below) | pass (run on Chrome on macOS) |
-| `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with scripted models, freshness regression (30 s / 60 s / 5 min), image validation and provenance, Vision routing and verification, and the dashboard-adapter contract checked against the agent's Zod schema | 55/55 pass |
+| `cd agent && npm test && npm run typecheck` | Agent tools, single- and multi-agent graphs with **scripted** models: input validation matching the database, mandatory visual verification, report integrity, history statistics, enforced deadlines and cancellation, full image decoding, evidence deduplication, source filtering, and recorded (persisted) mode | 163/163 pass |
+| `npm run test:equipment-e2e` | Real SpacetimeDB plus two browsers plus the agent's HTTP and LangGraph code with **scripted** model responses; the agent records the report under its own authorized identity | pass |
 | `npm run test:agent-e2e` | **Live** end to end: two Chrome sessions, a critical reading on Rack 01, a real Nemotron multi-agent investigation, storage in SpacetimeDB checked over SQL, sync between sessions, profile change and rerun, missing data, and failure handling | all 14 steps pass |
 | `npm run test:vision-e2e` | **Live** vision end to end: rejection of invalid uploads, upload of a real reference photo with provenance, a combined telemetry + vision investigation on real Nemotron VL, a hash check of the received bytes, verification of visual claims, storage in SpacetimeDB (provenance only), sync to a second browser, and an outage recorded as FAILED | pass |
 | `cd agent && npm run demo` | Live multi-agent runs on the sample scenarios (normal, critical, stale, contradictory) | pass |
@@ -260,11 +280,13 @@ scripts/              CLI helper, backend integration test, browser tests, live 
 - The Vision Agent can misread small details, and results vary between runs. In live tests it once placed an LED at the wrong port and once described an orange light as white. That's why visual findings are labelled AI observations, carry a certainty, and go through Verification. They are never treated as faults.
 - An online reference photo doesn't show the rack under investigation. The agents say so, but a real deployment needs rover-camera images.
 - The agent tools read the snapshot captured when you click Run. They don't query SpacetimeDB directly while the investigation runs.
-- AI reports are submitted by the client and are not cryptographically tied to the agent service. See the trust contract above.
-- An investigation takes about 25–40 s and nothing streams in the meantime. If a browser closes mid-run, the investigation shows as *Abandoned* after 5 minutes and stops blocking new runs.
+- Agent authorization relies on SpacetimeDB identities on a local server. On a database published before this change, `claim_admin` goes to whoever calls it first. Run `npm run agent:register` right after publishing, and keep the server on loopback.
+- Investigation reports and image previews are readable by every client connected to the database. There are no per-user permissions.
+- An investigation takes about 30–110 s and nothing streams in the meantime. If the browser closes, the agent still finishes and records the result. If the agent dies, the database marks the run `FAILED` after 5 minutes.
+- Combined telemetry-plus-photo runs can hit the 130 s budget. The report is then `INCOMPLETE` and says why.
 - Manufacturer guidance is limited to the exact supported identities in the curated source registry. Unknown identities receive NO_MATCH. Rover ambient telemetry cannot automatically establish manufacturer operating compliance.
 - Access control is suitable only for a local demo.
-- `npm run test:browser` is hardcoded to Microsoft Edge.
+- `npm run test:browser` and `npm run test:equipment-e2e` default to Microsoft Edge. Set `E2E_BROWSER_CHANNEL=chrome` to use Chrome.
 
 ## References
 

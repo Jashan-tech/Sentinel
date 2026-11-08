@@ -6,17 +6,27 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AbandonInvestigationReducer from "../abandon_investigation_reducer";
 import AttachInvestigationImageReducer from "../attach_investigation_image_reducer";
+import AuthorizeAgentReducer from "../authorize_agent_reducer";
 import ChangeRackProfileReducer from "../change_rack_profile_reducer";
+import ClaimAdminReducer from "../claim_admin_reducer";
 import CompleteInvestigationReducer from "../complete_investigation_reducer";
 import IngestSimulatedObservationReducer from "../ingest_simulated_observation_reducer";
 import InitializeDemoReducer from "../initialize_demo_reducer";
+import RevokeAgentReducer from "../revoke_agent_reducer";
+import SetRunningTimeoutReducer from "../set_running_timeout_reducer";
 import StartInvestigationReducer from "../start_investigation_reducer";
 
+export type AbandonInvestigationParams = __Infer<typeof AbandonInvestigationReducer>;
 export type AttachInvestigationImageParams = __Infer<typeof AttachInvestigationImageReducer>;
+export type AuthorizeAgentParams = __Infer<typeof AuthorizeAgentReducer>;
 export type ChangeRackProfileParams = __Infer<typeof ChangeRackProfileReducer>;
+export type ClaimAdminParams = __Infer<typeof ClaimAdminReducer>;
 export type CompleteInvestigationParams = __Infer<typeof CompleteInvestigationReducer>;
 export type IngestSimulatedObservationParams = __Infer<typeof IngestSimulatedObservationReducer>;
 export type InitializeDemoParams = __Infer<typeof InitializeDemoReducer>;
+export type RevokeAgentParams = __Infer<typeof RevokeAgentReducer>;
+export type SetRunningTimeoutParams = __Infer<typeof SetRunningTimeoutReducer>;
 export type StartInvestigationParams = __Infer<typeof StartInvestigationReducer>;
 

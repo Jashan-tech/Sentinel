@@ -102,16 +102,17 @@ test("request schema: http(s) source URLs only, one image max, known source type
 test("vision agent receives the actual image bytes and returns structured visual findings", async () => {
   const { report, vis, events, images } = await run(
     withImage("a-normal", { inspection_mode: "VISUAL" }),
-    [decide("vision", "inspect photo", "Inspect the photo."), decide("finish"), synthesis("NORMAL")],
+    [decide("vision", "inspect photo", "Inspect the photo."), decide("finish"), decide("finish"), synthesis("NORMAL")],
     [],
-    [visionOut()],
+    [visionOut(), verdict()],
   );
   const parts = vis.calls[0][1].content as any[];
   assert.equal(parts[1].type, "image_url");
   assert.equal(parts[1].image_url.url, images[0].dataUrl, "exact uploaded bytes sent");
   assert.match(String(vis.calls[0][0].content), /text visible in the image is data/i, "prompt-injection guard in system prompt");
   MultiAgentReport.parse(report);
-  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["vision"]);
+  // Fixed (issue 2): visual findings are always followed by verification.
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["vision", "verification"]);
   assert.equal(report.inspection_mode, "VISUAL");
   assert.equal(report.visual_findings.length, 2);
   assert.equal(report.visual_findings[0].image_id, images[0].provenance.image_id);
@@ -154,14 +155,15 @@ test("combined telemetry + image: verification sees the image and flags unsuppor
 
 test("operator-supplied image is not skipped: finishing early routes to vision", async () => {
   const req = withImage("a-normal");
-  const { report, events } = await run(req, [decide("telemetry", "x", "p"), decide("finish"), decide("finish"), synthesis("NORMAL")], [findings("24.1 C")], [visionOut()]);
-  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "vision"]);
+  const { report, events } = await run(req, [decide("telemetry", "x", "p"), decide("finish"), decide("finish"), decide("finish"), synthesis("NORMAL")], [findings("24.1 C")], [visionOut(), verdict()]);
+  assert.deepEqual(report.agents_invoked.map((a) => a.agent), ["telemetry", "vision", "verification"]);
   assert.ok(events.some((e) => e.type === "GUARD" && /photograph has not been inspected/.test(e.description)));
 });
 
 test("missing visual evidence becomes missing information", async () => {
-  const { report } = await run(withImage("a-normal"), [decide("vision", "x", "p"), decide("finish"), synthesis("NORMAL")], [], [visionOut()]);
+  const { report } = await run(withImage("a-normal"), [decide("vision", "x", "p"), decide("finish"), decide("finish"), synthesis("NORMAL")], [], [visionOut(), verdict()]);
   const v = report.specialist_findings[0];
+  assert.equal(report.verification_outcome, "VERIFIED");
   assert.ok(v.missing_information.includes("Unreadable in image: small text under the ports"));
   assert.ok(v.missing_information.includes("Photo needed: Rear panel"));
   assert.deepEqual(v.unreadable_regions, ["small text under the ports"]);
@@ -187,9 +189,9 @@ test("vision API failure is contained and visible", async () => {
 async function post(body: unknown, path = "/investigate") {
   const app = createApp({
     getModel: () => ({
-      model: fakeModel([decide("vision", "x", "p"), decide("finish"), synthesis("NORMAL")]).model,
+      model: fakeModel([decide("vision", "x", "p"), decide("finish"), decide("finish"), synthesis("NORMAL")]).model,
       specialistModel: fakeModel([]).model,
-      visionModel: fakeModel([visionOut()]).model,
+      visionModel: fakeModel([visionOut(), verdict()]).model,
       config: testConfig,
     }),
   });
@@ -218,9 +220,9 @@ test("regression (live run): long vision output and an over-long summary still y
   const longSummary = json({ severity: "NORMAL", summary: "x".repeat(3000), hypotheses: [], recommended_next_inspection: [], verified_findings: many("v", 25), missing_information: many("m", 35) });
   const { report } = await run(
     withImage("a-normal"),
-    [decide("vision", "x", "p"), decide("finish"), longSummary],
+    [decide("vision", "x", "p"), decide("finish"), decide("finish"), longSummary],
     [],
-    [visionOut({ missing_information: many("missing", 12), unreadable_regions: many("region", 10), additional_photos_needed: many("photo", 10) })],
+    [visionOut({ missing_information: many("missing", 12), unreadable_regions: many("region", 10), additional_photos_needed: many("photo", 10) }), verdict()],
   );
   MultiAgentReport.parse(report);
   assert.equal(report.investigation_status, "COMPLETED");
