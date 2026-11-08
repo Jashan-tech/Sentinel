@@ -10,6 +10,7 @@ import {
 /** Demonstration heuristics, NOT sensor calibration or manufacturer limits. */
 export const TREND_POLICY = {
   version: "sentinel-trends-v1",
+  maximum_source_series: 8,
   minimum_samples: 3,
   minimum_window_seconds: 60,
   maximum_gap_seconds: 120,
@@ -85,10 +86,18 @@ export function analyzeTrends(
       groups.set(key, [...(groups.get(key) ?? []), r]);
     }
     const threshold = metricThreshold(metric, req.profile);
-    const omittedSources = Math.max(0, groups.size - 8);
+    const omittedSources = Math.max(
+      0,
+      groups.size - TREND_POLICY.maximum_source_series,
+    );
     const series = [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, 8)
+      .sort(
+        ([a, ar], [b, br]) =>
+          Math.max(...br.map((r) => Date.parse(r.observed_at))) -
+            Math.max(...ar.map((r) => Date.parse(r.observed_at))) ||
+          a.localeCompare(b),
+      )
+      .slice(0, TREND_POLICY.maximum_source_series)
       .map(([key, input]) => {
         const times = new Map<number, TelemetryReading[]>();
         for (const r of input) {
@@ -157,9 +166,9 @@ export function analyzeTrends(
           "increasing" | "decreasing" | "stable" | "insufficient_data" =
           "insufficient_data";
         const eligible =
-          samples.length >= 3 &&
-          elapsed >= 60 &&
-          maxGap <= 120 &&
+          samples.length >= TREND_POLICY.minimum_samples &&
+          elapsed >= TREND_POLICY.minimum_window_seconds &&
+          maxGap <= TREND_POLICY.maximum_gap_seconds &&
           conflicts === 0 &&
           rejected.length === 0;
         if (eligible) {
@@ -206,7 +215,7 @@ export function analyzeTrends(
           if (
             breached(samples[i - 1]) &&
             breached(samples[i]) &&
-            seconds <= 120 &&
+            seconds <= TREND_POLICY.maximum_gap_seconds &&
             !conflictBetween &&
             !invalidBetween
           ) {
@@ -321,7 +330,21 @@ export function earlyWarnings(
       extra: Record<string, unknown> = {},
     ) => {
       output.push({
-        indicator_id: `${req.rack_id}:${t.metric_type}:${s?.series_id ?? "metric"}:${rule}`,
+        indicator_id: `${req.rack_id}:${t.metric_type}:${
+          s?.series_id ??
+          (extra.source_identifier
+            ? createHash("sha256")
+                .update(
+                  JSON.stringify([
+                    extra.source_type,
+                    extra.source_identifier,
+                    extra.simulated,
+                  ]),
+                )
+                .digest("hex")
+                .slice(0, 16)
+            : "metric")
+        }:${rule}`,
         rack_id: req.rack_id,
         metric: t.metric_type,
         severity,
@@ -361,7 +384,7 @@ export function earlyWarnings(
         null,
         "DATA_QUALITY",
         "UNKNOWN",
-        "Only the first 8 source series are analyzed for this metric; coverage is incomplete.",
+        "Only the 8 most recently observed source series are analyzed for this metric; coverage is incomplete.",
         ["Omitted source histories"],
         "Investigate a narrower sensor snapshot.",
         { omitted_source_series: t.omitted_source_series },
@@ -460,7 +483,7 @@ export function earlyWarnings(
           s.data_quality,
           "Gather consistent readings from the same sensor over a sufficient window.",
         );
-      if ((s.threshold_violations ?? 0) >= 3)
+      if ((s.threshold_violations ?? 0) >= TREND_POLICY.threshold_repetitions)
         add(
           "REPEATED_THRESHOLD",
           s,
@@ -505,14 +528,17 @@ export function earlyWarnings(
           t.metric_type === "ULTRASONIC_DISTANCE_CM") &&
         s.absolute_change !== null &&
         s.observation_count >= 2 &&
-        s.maximum_gap_seconds <= 120 &&
+        s.maximum_gap_seconds <= TREND_POLICY.maximum_gap_seconds &&
         s.conflicting_observations_excluded === 0 &&
         t.rejected_observations === 0
       ) {
         const threshold =
           t.metric_type === "SOUND_RAW"
-            ? Math.max(100, Math.abs(s.first_value!) * 0.25)
-            : 10;
+            ? Math.max(
+                TREND_POLICY.significant_change.SOUND_RAW,
+                Math.abs(s.first_value!) * 0.25,
+              )
+            : TREND_POLICY.significant_change.ULTRASONIC_DISTANCE_CM;
         if (Math.abs(s.absolute_change) >= threshold)
           add(
             "SIGNIFICANT_OBSERVED_CHANGE",

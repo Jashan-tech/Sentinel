@@ -4,6 +4,10 @@ A standalone HTTP service. POST it a rack snapshot, optionally with a photo, and
 
 The service does not depend on SpacetimeDB or the dashboard.
 
+## Equipment intelligence (Feature 5)
+
+[Equipment intelligence contract, source registry, rules and tests](EQUIPMENT_INTELLIGENCE.md) documents the deterministic trend/indicator tools, exact operator-identity matching, source-grounded manufacturer facts, and persisted report evidence. This extends the existing agents and real-photo workflow without adding an agent or changing the live NVIDIA model configuration. Model-specific guidance is unavailable for unidentified racks. Feature 5 end-to-end tests use the actual backend and scripted model responses; live NVIDIA inference requires the existing API key configuration.
+
 ## Quick start
 
 ```bash
@@ -208,12 +212,15 @@ The test photos are in [`test-assets/vision/`](test-assets/vision/): six Wikimed
 | `get_current_telemetry` | `rack_id`, `metric_type?` | Readings with full provenance, `age_minutes`, `stale`, `missing_metrics` |
 | `get_telemetry_history` | `rack_id`, `metric_type`, `limit?` (default 10, max 50) | Observations oldest to newest with `age_minutes`, and stats. `available:false` when there are none |
 | `get_rack_profile` | `rack_id` | Equipment type and fictional thresholds |
+| `analyze_telemetry_trends` | `rack_id`, `metric_type`, `source_identifier?` | Deterministic source-separated statistics, windows, breaches and data quality |
+| `get_early_warning_indicators` | `rack_id`, `metric_type`, `source_identifier?` | Conditions, trends and data-quality rules; no fault forecasts |
 | `lookup_equipment_documentation` | `equipment_type`, `topic?` | Local reference docs, each labelled with its provenance |
 
-The documentation set (`src/fixtures/docs/equipment-docs.json`) contains no manufacturer manuals. It holds:
+The documentation set (`src/fixtures/docs/equipment-docs.json`) holds concise sourced facts, not full manuals:
 - a note that the demo profiles are fictional
 - the project's notes on the rover's sensors
-- one explicit **UNAVAILABLE** manufacturer-spec entry per equipment type
+- an explicit **UNAVAILABLE** fallback for unidentified equipment
+- four exact-model section records from three official Cisco, Dell, and HPE documents, each carrying its source, revision, applicability conditions and limitations
 
 Tool results are capped at 8,000 characters. If a result would be longer, the oldest history entries are dropped first so the JSON stays valid.
 
@@ -235,6 +242,6 @@ The Supervisor picks the sequence each time, so it can differ between runs.
 - Tools read from the snapshot sent with the request. They are not yet wired to SpacetimeDB.
 - The final severity comes from the code policy described under Guards, not from the model. The Supervisor usually agrees with it. If it doesn't, a `GUARD` event records the change.
 - In live runs the Supervisor sometimes tried to finish a CRITICAL investigation without verification. The guard then routed it to verification.
-- The documentation set is intentionally minimal and includes no manufacturer specs. Agents report the specs as unavailable.
+- The curated manufacturer records require an exact explicit operator identity. They are conditional references, not automatic compliance checks; other models/topics return NO_MATCH.
 - A multi-agent investigation takes about 12–45 s and returns everything in one response; nothing is streamed.
 - `nvidia/nemotron-3-super-120b-a12b` and `nemotron-nano-3-30b-a3b` return 404 for our key.

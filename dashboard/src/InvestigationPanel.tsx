@@ -480,7 +480,7 @@ export default function InvestigationPanel(props: {
                   onClick={() =>
                     void run(includeTelemetry ? "COMBINED" : "VISUAL", image)
                   }
-                  disabled={!ready || !rowsReady || busy || runningElsewhere}
+                  disabled={!ready || !rowsReady || busy || runningElsewhere || !identityReady}
                 >
                   {busy || runningElsewhere
                     ? "Investigation running…"

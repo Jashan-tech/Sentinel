@@ -206,6 +206,18 @@ The dashboard's freshness setting (30 s, 60 s or 5 min) is sent with each invest
 
 ---
 
+## Equipment intelligence and early warnings (Feature 5)
+
+The existing agent tools now calculate deterministic per-sensor trends from subscribed observation history and produce separate observed-condition, early-warning, and data-quality indicators. The dashboard shows the actual observation window, units, source provenance, statistics, and rule evidence alongside the existing AI report. Three distinct official manufacturer documents (Cisco, Dell, HPE) provide four concise section records with exact model applicability, citations, and limitations.
+
+Installed equipment identity is **optional explicit operator input per investigation**. Generic rack profiles and online reference photos never identify installed hardware. Without an exact confirmed manufacturer/model match, documentation returns **NO_MATCH** and model-specific guidance remains unavailable. Identity and evidence persist through the existing SpacetimeDB snapshot/report records; no new database, agent, or unbounded history subscription was added.
+
+Trend rules require at least 3 samples over 60 seconds with at most 120 seconds between adjacent samples. Two-point changes are descriptive, never sustained trends. All thresholds/tolerances remain demonstration rules. Neither trends nor photos establish faults or failure forecasts.
+
+See [the full equipment-intelligence contract and source registry](agent/EQUIPMENT_INTELLIGENCE.md) for rules, API fields, supported models, trust limits and live verification steps. Run `npm run test:equipment-e2e` after `npm run db:verify:publish` for actual backend/two-browser integration with **explicitly scripted model responses**, not live NVIDIA inference. Feature 5 live inference was not run here because no NVIDIA key was configured.
+
+---
+
 ## Testing
 
 | Command | What it covers | Last result |
@@ -250,7 +262,7 @@ scripts/              CLI helper, backend integration test, browser tests, live 
 - The agent tools read the snapshot captured when you click Run. They don't query SpacetimeDB directly while the investigation runs.
 - AI reports are submitted by the client and are not cryptographically tied to the agent service. See the trust contract above.
 - An investigation takes about 25–40 s and nothing streams in the meantime. If a browser closes mid-run, the investigation shows as *Abandoned* after 5 minutes and stops blocking new runs.
-- The documentation set contains no real manufacturer manuals, so the agents report manufacturer specs as unavailable. The Industrial equipment type has no reference docs at all.
+- Manufacturer guidance is limited to the exact supported identities in the curated source registry. Unknown identities receive NO_MATCH. Rover ambient telemetry cannot automatically establish manufacturer operating compliance.
 - Access control is suitable only for a local demo.
 - `npm run test:browser` is hardcoded to Microsoft Edge.
 
