@@ -2941,3 +2941,10 @@ html {
 .rover-mission-log li span { font-variant-numeric: tabular-nums; opacity: 0.7; margin-right: 6px; }
 .rover-mission-log li.ai { color: var(--rover-yellow); }
 .rover-mission-row > div:first-child { flex: 1 1 320px; min-width: 0; }
+
+.rover-btn.arm { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.rover-btn.arm.on { color: var(--green); border-color: var(--green); }
+.rover-triggers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rover-triggers span { font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.rover-triggers span.fired { border-color: var(--red); color: var(--red); }
+.rover-mission-log li.trig { color: var(--red); font-weight: 600; }

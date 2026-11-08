@@ -69,6 +69,13 @@ const NVIDIA_API_KEY = env("NVIDIA_API_KEY");
 const NVIDIA_BASE_URL = env("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").replace(/\/$/, "");
 const NVIDIA_MODEL = env("NVIDIA_MODEL", "nvidia/nemotron-3.5-super-vl-120b-a12b");
 const INSPECT_RACK = env("ROVER_RACK", "rack-1");
+// Automatic check triggers (live rover readings and simulated dashboard values).
+const TRIGGERS = {
+  temp_c: Number(env("TRIGGER_TEMP_C", "30")),
+  humidity_pct: Number(env("TRIGGER_HUMIDITY_PCT", "60")),
+  sound_min: Number(env("TRIGGER_SOUND_MIN", "250")), // sudden sound must exceed this...
+  sound_factor: Number(env("TRIGGER_SOUND_FACTOR", "3")), // ...and this many times the 30 s background median
+};
 const MAX_REPOSITION = Number(env("ROVER_MAX_REPOSITION", "2"));
 type PatrolStep = { rack: string } | { turn: "left" | "right"; ms?: number } | { forward: number } | { back: number };
 // Hard-coded "move left for a better angle" maneuver (the rover cannot strafe). Calibrate on the floor.
@@ -92,6 +99,8 @@ if (!TOKEN) {
 
 // Live status for the dashboard (GET /status on the control port).
 const status = {
+  armed: env("ROVER_AUTO_CHECKS", "off") === "on", // off at start so the rover never moves unexpectedly
+  last_trigger: null as string | null,
   running: false,
   phase: "idle",
   rack: null as string | null,
@@ -529,7 +538,12 @@ if (MANUAL_RACK) {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (req.method === "GET" && url.pathname === "/status") return json(200, { ...status, rack_target: INSPECT_RACK });
+    if (req.method === "GET" && url.pathname === "/status") return json(200, { ...status, rack_target: INSPECT_RACK, triggers: TRIGGERS });
+    if (req.method === "POST" && url.pathname === "/arm") {
+      status.armed = url.searchParams.get("on") !== "0";
+      log(`Auto-checks ${status.armed ? "ON" : "OFF"}`);
+      return json(200, { armed: status.armed });
+    }
     if (req.method === "POST" && url.pathname === "/patrol") {
       if (busy) return json(409, { error: "rover is busy" });
       void run("inspection", () => smartInspect(db, INSPECT_RACK, "dashboard Start"));
@@ -558,8 +572,10 @@ if (MANUAL_RACK) {
       for (const k of [...seen]) if (k.startsWith(`${a.alertId}:`)) seen.delete(k); // resolved: may fire again later
       return;
     }
-    if (a.severity !== "CRITICAL") return;
-    if (!["AMBIENT_TEMPERATURE_C", "RELATIVE_HUMIDITY_PERCENT"].includes(a.metricType)) return;
+    if (!status.armed) return;
+    const isTemp = a.metricType === "AMBIENT_TEMPERATURE_C";
+    const isHum = a.metricType === "RELATIVE_HUMIDITY_PERCENT";
+    if (!(isTemp && a.severity === "CRITICAL") && !(isHum && (a.severity === "WARNING" || a.severity === "CRITICAL"))) return;
     const key = `${a.alertId}:${a.severity}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -573,5 +589,59 @@ if (MANUAL_RACK) {
   };
   db.db.rackAlert.onInsert((_ctx, a) => consider(a));
   db.db.rackAlert.onUpdate((_ctx, _old, a) => consider(a));
-  log("watching for CRITICAL simulated alerts (Ctrl+C to stop)");
+
+  // ---- automatic checks ----
+  let lastAuto = 0;
+  const trigger = (reason: string) => {
+    if (!status.armed || busy || Date.now() - lastAuto < COOLDOWN_MS) return;
+    lastAuto = Date.now();
+    status.last_trigger = `${new Date().toLocaleTimeString()} ${reason}`;
+    log(`TRIGGER: ${reason}`);
+    void run(`inspection of ${INSPECT_RACK}`, async () => {
+      try {
+        await smartInspect(db, INSPECT_RACK, reason);
+      } finally {
+        lastAuto = Date.now(); // cooldown counts from the end of the check
+      }
+    });
+  };
+
+  // Simulated values typed on the dashboard (rules only alert on temp/humidity profiles; sound has none).
+  const onCurrent = (c: { rackId: string; metricType: string; numericValue: number; sourceType: string }) => {
+    if (c.sourceType !== "SIMULATOR") return;
+    if (c.metricType === "RELATIVE_HUMIDITY_PERCENT" && c.numericValue > TRIGGERS.humidity_pct)
+      trigger(`simulated humidity ${c.numericValue}% on ${c.rackId} is above ${TRIGGERS.humidity_pct}%`);
+    if (c.metricType === "SOUND_RAW" && c.numericValue > TRIGGERS.sound_min)
+      trigger(`simulated sound ${c.numericValue} on ${c.rackId} is above ${TRIGGERS.sound_min}`);
+    if (c.metricType === "AMBIENT_TEMPERATURE_C" && c.numericValue > TRIGGERS.temp_c)
+      trigger(`simulated temperature ${c.numericValue} °C on ${c.rackId} is above ${TRIGGERS.temp_c} °C`);
+  };
+  db.db.currentTelemetry.onInsert((_ctx, c) => onCurrent(c));
+  db.db.currentTelemetry.onUpdate((_ctx, _old, c) => onCurrent(c));
+
+  // Live rover sensors, polled while idle.
+  const soundHist: { t: number; v: number }[] = [];
+  setInterval(async () => {
+    if (busy) return;
+    let s: RoverSensors;
+    try {
+      s = await sensors();
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    if (s.sound !== null) {
+      const bg = soundHist.length >= 10 ? [...soundHist].map((x) => x.v).sort((a, b) => a - b)[Math.floor(soundHist.length / 2)] : null;
+      if (bg !== null && s.sound > TRIGGERS.sound_min && s.sound > TRIGGERS.sound_factor * Math.max(bg, 1))
+        trigger(`sudden loud sound: ${s.sound} vs background ${bg}`);
+      soundHist.push({ t: now, v: s.sound });
+      while (soundHist.length && now - soundHist[0].t > 30_000) soundHist.shift();
+    }
+    if (s.age_s !== null && s.age_s <= 5) {
+      if (s.hum !== null && s.hum > TRIGGERS.humidity_pct) trigger(`humidity ${s.hum}% is above ${TRIGGERS.humidity_pct}%`);
+      if (s.temp_c !== null && s.temp_c > TRIGGERS.temp_c) trigger(`temperature ${s.temp_c} °C is above ${TRIGGERS.temp_c} °C`);
+    }
+  }, 500);
+  log(`auto-checks ${status.armed ? "ON" : "OFF"}: temp > ${TRIGGERS.temp_c} °C, humidity > ${TRIGGERS.humidity_pct}%, sudden sound > ${TRIGGERS.sound_factor}x background (min ${TRIGGERS.sound_min})`);
+  log("watching for alerts (Ctrl+C to stop)");
 }

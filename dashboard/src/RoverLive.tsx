@@ -91,6 +91,9 @@ function Tile(props: { icon: "temperature" | "humidity" | "sound"; label: string
 }
 
 interface DispatchStatus {
+  armed: boolean;
+  last_trigger: string | null;
+  triggers?: { temp_c: number; humidity_pct: number; sound_min: number; sound_factor: number };
   running: boolean;
   phase: string;
   rack: string | null;
@@ -124,15 +127,31 @@ function MissionControl() {
           <div className="rover-mission-phase">
             {err ? err : st?.running ? `${st.phase}${st.rack ? ` · ${st.rack}` : ""}` : "Ready"}
           </div>
+          {st?.triggers && (
+            <div className="rover-triggers">
+              <span>Temp &gt; {st.triggers.temp_c} °C</span>
+              <span>Humidity &gt; {st.triggers.humidity_pct}%</span>
+              <span>Sudden sound &gt; {st.triggers.sound_factor}× background</span>
+              {st.last_trigger && <span className="fired">Last trigger: {st.last_trigger}</span>}
+            </div>
+          )}
           <ol className="rover-mission-log">
             {(st?.log ?? []).slice(-6).map((l, i) => (
-              <li key={`${l.t}-${i}`} className={l.m.startsWith("AI sees") ? "ai" : ""}>
+              <li key={`${l.t}-${i}`} className={l.m.startsWith("AI sees") ? "ai" : l.m.startsWith("TRIGGER") ? "trig" : ""}>
                 <span>{l.t}</span> {l.m}
               </li>
             ))}
           </ol>
         </div>
         <div className="rover-mission-buttons">
+          <button
+            className={`rover-btn arm ${st?.armed ? "on" : ""}`}
+            disabled={Boolean(err)}
+            onClick={() => void post(`/arm?on=${st?.armed ? 0 : 1}`)}
+            title="Automatically send the rover when a trigger fires"
+          >
+            Auto-checks {st?.armed ? "ON" : "OFF"}
+          </button>
           <button className="rover-btn go" disabled={Boolean(err) || st?.running} onClick={() => void post("/patrol")}>
             Start Inspection
           </button>
