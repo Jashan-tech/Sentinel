@@ -222,7 +222,7 @@ function RoverInspections() {
   const [investigations] = useTable(tables.investigation);
   const [images] = useTable(tables.investigationImage);
   const rover = images
-    .filter((i) => i.sourceType === "ROVER_CAMERA")
+    .filter((i) => i.sourceType === "ROVER_CAMERA" && i.thumbnailDataUrl) // only inspections with a real rover photo
     .map((img) => ({ img, inv: investigations.find((v) => v.investigationId === img.investigationId) }))
     .filter((x) => x.inv)
     .sort((a, b) => (a.img.uploadedAt.microsSinceUnixEpoch < b.img.uploadedAt.microsSinceUnixEpoch ? 1 : -1))

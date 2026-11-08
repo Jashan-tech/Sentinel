@@ -312,6 +312,33 @@ async function investigate(db: DbConnection, rackId: string, image: ImageAttachm
 // ---------------- missions ----------------
 let busy = false;
 let abort = false;
+/** Every move made during the current mission, so the rover can retrace them back to its start. */
+let trail: PatrolStep[] = [];
+async function fwd(ms: number) { trail.push({ forward: ms }); await drive(APPROACH_SPEED, ms); }
+async function back(ms: number) { trail.push({ back: ms }); await drive(-APPROACH_SPEED, ms); }
+async function turn(dir: "left" | "right", ms: number) {
+  trail.push({ turn: dir, ms });
+  const sp = dir === "right" ? TURN_SPEED : -TURN_SPEED;
+  await driveLR(sp, -sp, ms);
+}
+/** Undo the trail in reverse order (forward <-> back, left <-> right). */
+async function returnHome() {
+  if (!trail.length) return;
+  phase("returning to start");
+  log(`Returning to start (${trail.length} move${trail.length > 1 ? "s" : ""} to retrace).`);
+  const steps = trail.reverse();
+  trail = [];
+  for (const st of steps) {
+    if ("forward" in st) await drive(-APPROACH_SPEED, st.forward);
+    else if ("back" in st) await drive(APPROACH_SPEED, st.back);
+    else if ("turn" in st) {
+      const sp = st.turn === "right" ? -TURN_SPEED : TURN_SPEED;
+      await driveLR(sp, -sp, st.ms ?? TURN_MS);
+    }
+    await sleep(250);
+  }
+  log("Back at the starting spot.");
+}
 const checkAbort = () => {
   if (abort) throw new Error("stopped by operator");
 };
@@ -319,8 +346,11 @@ const checkAbort = () => {
 async function approach() {
   const r = await roverText(`/approach?target=${APPROACH_CM}&speed=${APPROACH_SPEED}&max_ms=${APPROACH_MAX_MS}`, APPROACH_MAX_MS + 10_000);
   log(`approach: ${r}`);
+  const ms = Number(r.match(/ms=(\d+)/)?.[1] ?? 0);
+  if (ms > 0) trail.push({ forward: ms });
   if (!r.includes("stop=OK")) throw new Error(`approach did not stop cleanly: ${r}`);
   if (r.includes("reason=no-distance")) throw new Error("distance sensor went quiet; stopped for safety");
+  if (r.includes("reason=timeout")) log("Nothing close ahead within the drive limit; stopping here.");
 }
 
 /** Drive up to the rack, photograph it, record real readings, run the AI, back away. */
@@ -359,6 +389,7 @@ async function run(name: string, body: () => Promise<void>) {
   }
   busy = true;
   abort = false;
+  trail = [];
   status.running = true;
   try {
     await body();
@@ -367,6 +398,8 @@ async function run(name: string, body: () => Promise<void>) {
     log(`${name} aborted: ${(e as Error).message}`);
     await roverText("/cmd?c=S").catch(() => {});
   } finally {
+    if (!abort) await returnHome().catch((e) => log(`could not return: ${(e as Error).message}`));
+    else if (trail.length) log("Stopped by operator; not driving back.");
     busy = false;
     status.running = false;
     phase("idle", null);
@@ -444,11 +477,9 @@ async function lookAndLog(where: string) {
 async function runMoves(steps: PatrolStep[]) {
   for (const step of steps) {
     checkAbort();
-    if ("turn" in step) {
-      const sp = step.turn === "right" ? TURN_SPEED : -TURN_SPEED;
-      await driveLR(sp, -sp, step.ms ?? TURN_MS);
-    } else if ("forward" in step) await drive(APPROACH_SPEED, step.forward);
-    else if ("back" in step) await drive(-APPROACH_SPEED, step.back);
+    if ("turn" in step) await turn(step.turn, step.ms ?? TURN_MS);
+    else if ("forward" in step) await fwd(step.forward);
+    else if ("back" in step) await back(step.back);
     await sleep(300);
   }
 }
@@ -469,14 +500,12 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
     if (l.rack_visible && !l.full_rack_visible) {
       log("Rack is cut off in the frame; backing up for the full view.");
       phase("backing up for full view", rackId);
-      await drive(-APPROACH_SPEED, 500);
+      await back(500);
       await sleep(500);
       l = await lookAndLog("backed up");
     }
     if (!l.rack_visible) {
-      log("AI decision: no server rack here, so no photo. Backing away.");
-      phase("backing away", rackId);
-      await drive(-APPROACH_SPEED, BACKUP_MS);
+      log("AI decision: no server rack here, so no photo.");
       return;
     }
   } else {
@@ -512,6 +541,7 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
     if (i < SENSOR_SAMPLES - 1) await sleep(1500);
   }
   checkAbort();
+  await returnHome(); // drive back while the AI works
   await investigate(db, rackId, image);
 }
 
