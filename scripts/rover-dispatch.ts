@@ -815,10 +815,18 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
   log(`photo ${image.width}x${image.height}, ${(image.byteSize / 1024).toFixed(0)} KB`);
   phase("reading sensors", rackId);
   for (let i = 0; i < SENSOR_SAMPLES; i++) {
-    const s = await sensors();
-    if (s.age_s === null || s.age_s > 5) throw new Error("rover sensors are offline");
-    const n = await recordReadings(db, rackId, s);
-    log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
+    try {
+      const s = await sensors();
+      if (s.age_s === null || s.age_s > 5) {
+        log("Sensor board not responding; sending the photo without new readings.");
+        break;
+      }
+      const n = await recordReadings(db, rackId, s);
+      log(`reading ${i + 1}/${SENSOR_SAMPLES}: ${s.temp_c} °C, ${s.hum} %RH, sound ${s.sound} (${n} recorded)`);
+    } catch (e) {
+      log(`Readings skipped (${(e as Error).message}); sending the photo anyway.`);
+      break;
+    }
     if (i < SENSOR_SAMPLES - 1) await sleep(1200);
   }
   await sleep(ROUTE.pauseMs);
