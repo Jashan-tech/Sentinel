@@ -797,7 +797,7 @@ async function smartInspect(db: DbConnection, rackId: string, why: string) {
 
 // ---- fixed demo route ----
 const ROUTE = {
-  startCm: Number(env("ROUTE_START_CM", "55")), // drive until the box is this far (distance sensor), then start
+  startCm: Number(env("ROUTE_START_CM", "45")), // drive until the box is this far (distance sensor), then start
   diagDeg: Number(env("ROUTE_DIAG_DEG", "45")),
   diagCm: Number(env("ROUTE_DIAG_CM", "40")),
   diagRightCm: Number(env("ROUTE_DIAG_RIGHT_CM", "50")), // a bit further on the photo side
@@ -818,7 +818,7 @@ async function showView(where: string, view: string, note: string, wires: boolea
 
 // ---- distance-aware moves ----
 const MIN_CM = Number(env("ROUTE_MIN_CM", "22"));       // never drive closer than this to anything ahead
-const PHOTO_CM = Number(env("ROUTE_PHOTO_CM", "50"));   // best distance from the box for a look/photo
+const PHOTO_CM = Number(env("ROUTE_PHOTO_CM", "38"));   // best distance from the box for a look/photo
 /** Drive forward up to `cm`, but stop early if something is closer than `stopCm` (distance sensor). Recorded for home. */
 async function safeFwd(cm: number, stopCm = MIN_CM): Promise<number | null> {
   const r = await roverText(`/approach?target=${stopCm}&speed=${APPROACH_SPEED}&max_ms=${cmToMs(cm)}`, 20_000);
