@@ -839,11 +839,11 @@ async function standoff(where: string) {
 
 /** Ask Nemotron if the cabled rack is in view. If the box is partly in view, nudge toward it
  *  (small turn + a little push forward); otherwise scan left/right. All moves are recorded for the way home. */
-async function findWiresNearby(where: string, scan = true): Promise<boolean> {
+async function findWiresNearby(where: string, scan = true, nudge = true): Promise<boolean> {
   const step = Number(env("ROUTE_SCAN_DEG", "20"));
   const pushCm = Number(env("ROUTE_PUSH_CM", "8"));
   let l = await lookAndLog(where);
-  for (let i = 0; i < 3 && l.view !== "OPEN_RACK_CABLES" && l.rack_visible && l.x !== null; i++) {
+  for (let i = 0; nudge && i < 2 && l.view !== "OPEN_RACK_CABLES" && l.rack_visible && l.x !== null; i++) {
     checkAbort();
     const errDeg = (l.x - 0.5) * FOV_DEG;
     if (Math.abs(errDeg) >= 8) await turnDeg(errDeg > 0 ? "right" : "left", Math.min(12, Math.abs(errDeg) * 0.6));
@@ -851,17 +851,30 @@ async function findWiresNearby(where: string, scan = true): Promise<boolean> {
     if (d === null || d > PHOTO_CM - 8) { log(`Nudging up to ${pushCm} cm closer to the box.`); await safeFwd(pushCm, PHOTO_CM - 8); await sleep(300); }
     l = await lookAndLog(`${where} (nudged)`);
   }
-  if (l.view === "OPEN_RACK_CABLES") return true;
+  if (l.view === "OPEN_RACK_CABLES") { await centreTarget(where, l); return true; }
   if (!scan) return false;
   let at = 0; // scan offset in degrees: negative = left
   for (const target of [-step, -2 * step, step, 2 * step]) {
     checkAbort();
     const dd = target - at; await turnDeg(dd < 0 ? "left" : "right", Math.abs(dd)); at = target;
     l = await lookAndLog(`${where}, turned ${Math.abs(target)}° ${target < 0 ? "left" : "right"}`);
-    if (l.view === "OPEN_RACK_CABLES") return true;
+    if (l.view === "OPEN_RACK_CABLES") { await centreTarget(where, l); return true; }
   }
   await turnDeg(at < 0 ? "right" : "left", Math.abs(at));
   return false;
+}
+
+/** Wires are in view: turn a little so they fill the middle of the photo. If a turn loses them, turn back. */
+async function centreTarget(where: string, l: Look) {
+  for (let i = 0; i < 2 && l.x !== null; i++) {
+    const errDeg = (l.x - 0.5) * FOV_DEG;
+    if (Math.abs(errDeg) < 8) return;
+    log(`Wires are off to the ${errDeg > 0 ? "right" : "left"}; turning to centre them.`);
+    await turnDeg(errDeg > 0 ? "right" : "left", Math.min(15, Math.abs(errDeg) * 0.7));
+    const n = await lookAndLog(`${where} (centring the wires)`);
+    if (n.view !== "OPEN_RACK_CABLES") { await undoLast(); await sleep(350); return; } // went too far: go back
+    l = n;
+  }
 }
 
 /** Predefined route: front, left side (no wires), back to centre, right side (wires: photo), back to start. */
@@ -909,7 +922,7 @@ async function routeInspect(db: DbConnection, rackId: string, why: string) {
 
   // front
   phase("inspecting the front", rackId);
-  if (await findWiresNearby("Front", false)) return finish("Front", true);
+  if (await findWiresNearby("Front", false, false)) return finish("Front", true);
   log("Front: no exposed wires. Checking the left side.");
   await sleep(ROUTE.pauseMs);
   const centreMark = trail.length;
